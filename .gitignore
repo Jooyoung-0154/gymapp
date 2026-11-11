@@ -1,0 +1,6 @@
+.validation/
+.env
+.env.*
+!.env.example
+server/target/
+*.log
