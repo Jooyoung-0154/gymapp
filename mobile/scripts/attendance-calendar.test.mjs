@@ -1,3 +1,4 @@
+// [목적] attendance-calendar.test.mjs 파일: 월 이동·달력 배치·출석 집계의 기대 결과를 확인하는 Node 테스트입니다.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { calendarCells, shiftMonth, attendanceCount } from '../src/utils/attendanceCalendar.ts';

@@ -1,3 +1,4 @@
+// [목적] FeatureScreen.tsx 파일: 아직 연결되지 않은 기능에 대해 화면별 안내 내용을 표시하는 컴포넌트입니다.
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, fonts, layout } from '../theme/warmWellness';
@@ -23,6 +24,7 @@ export function FeatureScreen({ screen }: { screen: keyof typeof content }) {
   );
 }
 
+// [구성] styles 변수: 화면 요소의 색상·크기·간격을 정의합니다. 컴포넌트의 style 속성에서 이름으로 참조합니다.
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   content: { padding: layout.pageGutter, gap: 24 },

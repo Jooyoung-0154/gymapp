@@ -1,3 +1,4 @@
+// [목적] SecurityToolsTest.java 파일: 암복호화·비밀번호·인증번호 등 보안 도구의 동작을 검증하는 테스트입니다.
 package kr.gym;
 
 import org.junit.jupiter.api.Test;

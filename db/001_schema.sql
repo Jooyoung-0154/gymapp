@@ -1,3 +1,4 @@
+-- [목적] 001_schema.sql 파일: 신규 개발 DB용 기준 스키마입니다. 테이블은 데이터, 제약은 무결성, 인덱스는 조회, 트리거는 저장 시 검증을 담당합니다.
 -- 요구사항정의서 v1.0 / DB 설계 v1.0 / PostgreSQL 15+
 -- 신규 개발 DB용 기준 스키마. 기존 v0.1 DB의 업그레이드 스크립트가 아니다.
 BEGIN;
@@ -9,6 +10,7 @@ SET LOCAL search_path = gym, public;
 
 -- 로그인 식별 정보는 암호화한 전화번호와 검색용 HMAC로 분리한다.
 -- 모든 암호화 키는 DB 밖 KMS에서 관리. *_key_ref는 비밀값이 아니다.
+-- [구성] accounts 테이블: 로그인 계정과 암호화된 개인정보·보안 상태를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE accounts (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  phone_lookup_hmac bytea NOT NULL UNIQUE,
@@ -27,6 +29,7 @@ CREATE TABLE accounts (
  updated_at timestamptz NOT NULL DEFAULT now(),
  CHECK (status <> 'ACTIVE' OR password_hash IS NOT NULL)
 );
+-- [구성] account_roles 테이블: 계정에 부여한 회원·트레이너·운영자 역할를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE account_roles (
  account_id bigint NOT NULL REFERENCES accounts,
  role text NOT NULL CHECK (role IN ('MEMBER','TRAINER','OPERATOR')),
@@ -34,6 +37,7 @@ CREATE TABLE account_roles (
  granted_at timestamptz NOT NULL DEFAULT now(),
  PRIMARY KEY (account_id,role)
 );
+-- [구성] members 테이블: 시설 회원의 등록·승인·이용 상태를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE members (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  account_id bigint NOT NULL UNIQUE REFERENCES accounts,
@@ -44,6 +48,7 @@ CREATE TABLE members (
  created_at timestamptz NOT NULL DEFAULT now(),
  CHECK (status <> 'ACTIVE' OR (approved_by IS NOT NULL AND approved_at IS NOT NULL))
 );
+-- [구성] trainers 테이블: 트레이너의 계정 연결과 운영 정보를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE trainers (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  account_id bigint NOT NULL UNIQUE REFERENCES accounts,
@@ -51,6 +56,7 @@ CREATE TABLE trainers (
  left_at timestamptz,
  CHECK (status <> 'LEFT' OR left_at IS NOT NULL)
 );
+-- [구성] auth_codes 테이블: 활성화·비밀번호 재설정용 일회용 코드의 지문과 만료·소비 상태를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE auth_codes (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  account_id bigint NOT NULL REFERENCES accounts,
@@ -66,6 +72,7 @@ CREATE TABLE auth_codes (
 );
 CREATE UNIQUE INDEX one_live_code ON auth_codes(account_id,purpose)
  WHERE consumed_at IS NULL AND revoked_at IS NULL;
+-- [구성] mfa_enrollments 테이블: 운영자 추가 인증용 암호화 비밀키와 인증 상태를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE mfa_enrollments (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  account_id bigint NOT NULL REFERENCES accounts,
@@ -77,6 +84,7 @@ CREATE TABLE mfa_enrollments (
  created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX one_live_mfa ON mfa_enrollments(account_id) WHERE revoked_at IS NULL;
+-- [구성] mfa_recovery_codes 테이블: 추가 인증 복구 코드의 지문과 사용 상태를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE mfa_recovery_codes (
  enrollment_id bigint NOT NULL REFERENCES mfa_enrollments,
  code_no smallint NOT NULL CHECK (code_no BETWEEN 1 AND 10),
@@ -84,6 +92,7 @@ CREATE TABLE mfa_recovery_codes (
  used_at timestamptz,
  PRIMARY KEY (enrollment_id,code_no)
 );
+-- [구성] account_sessions 테이블: 계정별 세션 지문·권한·만료·폐기 상태를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE account_sessions (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  account_id bigint NOT NULL REFERENCES accounts,
@@ -100,6 +109,7 @@ CREATE TABLE account_sessions (
  CHECK (expires_at = created_at + CASE privilege WHEN 'OPERATOR' THEN interval '12 hours' ELSE interval '30 days' END),
  CHECK (privilege <> 'OPERATOR' OR mfa_verified_at IS NOT NULL)
 );
+-- [구성] login_attempts 테이블: 로그인 성공·실패 기록과 시도 제한용 지문를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE login_attempts (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  account_id bigint REFERENCES accounts,
@@ -112,6 +122,7 @@ CREATE TABLE login_attempts (
 CREATE INDEX login_failure_window ON login_attempts(login_fingerprint,attempted_at) WHERE NOT succeeded;
 CREATE INDEX login_source_window ON login_attempts(source_fingerprint,attempted_at);
 
+-- [구성] policy_versions 테이블: 시행 시점별 정책 버전를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE policy_versions (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  version_name text NOT NULL UNIQUE,
@@ -125,6 +136,7 @@ CREATE TABLE policy_versions (
  CHECK (effective_until IS NULL OR effective_until > effective_from),
  EXCLUDE USING gist (tstzrange(effective_from,effective_until,'[)') WITH &&)
 );
+-- [구성] gym_settings 테이블: 시설의 기본 운영 설정를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE gym_settings (
  id smallint PRIMARY KEY CHECK (id = 1),
  name text NOT NULL,
@@ -138,6 +150,7 @@ CREATE TABLE gym_settings (
  CHECK ((normal_from IS NULL AND crowded_from IS NULL) OR
   (normal_from IS NOT NULL AND crowded_from IS NOT NULL AND normal_from > 0 AND crowded_from > normal_from))
 );
+-- [구성] weekly_opening_hours 테이블: 요일별 정규 영업시간를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE weekly_opening_hours (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  iso_weekday smallint NOT NULL CHECK (iso_weekday BETWEEN 1 AND 7),
@@ -155,6 +168,7 @@ CREATE TABLE weekly_opening_hours (
  EXCLUDE USING gist (iso_weekday WITH =, daterange(effective_from,effective_until,'[)') WITH &&)
 );
 -- 날짜는 KST 달력 날짜다. CLOSED는 전날 시작한 익일 영업에도 우선한다.
+-- [구성] calendar_overrides 테이블: 특정 날짜의 휴무·변경 영업 예외를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE calendar_overrides (
  business_date date PRIMARY KEY,
  kind text NOT NULL CHECK (kind IN ('CLOSED','CUSTOM_OPEN')),
@@ -163,6 +177,7 @@ CREATE TABLE calendar_overrides (
  changed_by bigint NOT NULL REFERENCES accounts,
  updated_at timestamptz NOT NULL DEFAULT now()
 );
+-- [구성] calendar_open_intervals 테이블: 영업 달력의 실제 개방 시간 구간를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE calendar_open_intervals (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  business_date date NOT NULL REFERENCES calendar_overrides,
@@ -171,6 +186,7 @@ CREATE TABLE calendar_open_intervals (
  CHECK (ends_at > starts_at AND ends_at-starts_at <= interval '24 hours'),
  EXCLUDE USING gist (business_date WITH =,tstzrange(starts_at,ends_at,'[)') WITH &&)
 );
+-- [구성] pause_policy_versions 테이블: 휴회 처리에 적용할 정책 버전를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE pause_policy_versions (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  effective_from timestamptz NOT NULL,
@@ -185,6 +201,7 @@ CREATE TABLE pause_policy_versions (
  EXCLUDE USING gist (tstzrange(effective_from,effective_until,'[)') WITH &&)
 );
 
+-- [구성] memberships 테이블: 회원별 시설 이용권과 유효기간를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE memberships (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  member_id bigint NOT NULL REFERENCES members,
@@ -206,6 +223,7 @@ CREATE TABLE memberships (
   (member_id WITH =,daterange(starts_on,current_expires_on+1,'[)') WITH &&)
   WHERE (status='REGISTERED') DEFERRABLE INITIALLY IMMEDIATE
 );
+-- [구성] pt_passes 테이블: 시설 이용권과 별개인 PT 계약·잔여·예약 확보 횟수를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE pt_passes (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  member_id bigint NOT NULL REFERENCES members,
@@ -222,6 +240,7 @@ CREATE TABLE pt_passes (
  UNIQUE (id,member_id),
  CHECK (original_expires_on >= starts_on AND current_expires_on >= starts_on)
 );
+-- [구성] pause_requests 테이블: 회원의 휴회 신청과 처리 상태를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE pause_requests (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  membership_id bigint NOT NULL,
@@ -254,6 +273,7 @@ CREATE TABLE pause_requests (
   WHERE (status IN ('APPROVED','ACTIVE','ENDED'))
 );
 
+-- [구성] trainer_assignments 테이블: 회원과 담당 트레이너의 배정 관계를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE trainer_assignments (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  member_id bigint NOT NULL REFERENCES members,
@@ -266,6 +286,7 @@ CREATE TABLE trainer_assignments (
  CHECK (effective_until IS NULL OR effective_until > effective_from),
  EXCLUDE USING gist (member_id WITH =,tstzrange(effective_from,effective_until,'[)') WITH &&)
 );
+-- [구성] trainer_slots 테이블: 트레이너가 공개한 예약 가능 시간를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE trainer_slots (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  trainer_id bigint NOT NULL REFERENCES trainers,
@@ -280,6 +301,7 @@ CREATE TABLE trainer_slots (
  CHECK (extract(minute FROM starts_at AT TIME ZONE 'Asia/Seoul') IN (0,30)
   AND extract(second FROM starts_at AT TIME ZONE 'Asia/Seoul')=0)
 );
+-- [구성] pt_bookings 테이블: PT 예약의 일정·상태·차감 예정 정보를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE pt_bookings (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  member_id bigint NOT NULL REFERENCES members,
@@ -311,6 +333,7 @@ CREATE TABLE pt_bookings (
  EXCLUDE USING gist (trainer_id WITH =,tstzrange(starts_at,ends_at,'[)') WITH &&) WHERE (status<>'CANCELLED'),
  EXCLUDE USING gist (member_id WITH =,tstzrange(starts_at,ends_at,'[)') WITH &&) WHERE (status<>'CANCELLED')
 );
+-- [구성] pt_booking_changes 테이블: PT 예약 변경 요청과 처리 상태를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE pt_booking_changes (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  booking_id bigint NOT NULL REFERENCES pt_bookings,
@@ -331,6 +354,7 @@ CREATE TABLE pt_booking_changes (
  CHECK (status<>'ACCEPTED' OR (member_decided_by IS NOT NULL AND member_decided_at IS NOT NULL AND applied_at IS NOT NULL))
 );
 CREATE UNIQUE INDEX one_pending_booking_change ON pt_booking_changes(booking_id) WHERE status='PENDING';
+-- [구성] pt_booking_events 테이블: PT 예약의 상태 변화 이력를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE pt_booking_events (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  booking_id bigint NOT NULL REFERENCES pt_bookings,
@@ -342,6 +366,7 @@ CREATE TABLE pt_booking_events (
  after_values jsonb NOT NULL,
  occurred_at timestamptz NOT NULL DEFAULT now()
 );
+-- [구성] pt_charge_exceptions 테이블: PT 차감 예외 처리 이력를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE pt_charge_exceptions (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  booking_id bigint NOT NULL REFERENCES pt_bookings,
@@ -352,6 +377,7 @@ CREATE TABLE pt_charge_exceptions (
  created_at timestamptz NOT NULL DEFAULT now(),
  UNIQUE (booking_id,action)
 );
+-- [구성] pt_holds 테이블: 예약이 확보한 PT 이용 횟수를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE pt_holds (
  booking_id bigint PRIMARY KEY,
  member_id bigint NOT NULL,
@@ -362,6 +388,7 @@ CREATE TABLE pt_holds (
  FOREIGN KEY (booking_id,member_id,pt_pass_id) REFERENCES pt_bookings(id,member_id,pt_pass_id),
  CHECK ((status='HELD' AND resolved_at IS NULL) OR (status<>'HELD' AND resolved_at IS NOT NULL))
 );
+-- [구성] pt_credit_entries 테이블: PT 횟수의 증감 원장를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE pt_credit_entries (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  member_id bigint NOT NULL,
@@ -389,6 +416,7 @@ CREATE TABLE pt_credit_entries (
 );
 CREATE UNIQUE INDEX one_booking_consumption ON pt_credit_entries(booking_id) WHERE kind='CONSUME';
 
+-- [구성] checkin_devices 테이블: 입장 확인에 사용하는 기기를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE checkin_devices (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  name text NOT NULL,
@@ -399,6 +427,7 @@ CREATE TABLE checkin_devices (
  last_seen_at timestamptz,
  CHECK (status<>'REVOKED' OR revoked_at IS NOT NULL)
 );
+-- [구성] member_qr_credentials 테이블: 회원 입장용 QR의 유효성 정보를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE member_qr_credentials (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  member_id bigint NOT NULL REFERENCES members,
@@ -410,6 +439,7 @@ CREATE TABLE member_qr_credentials (
  revoked_at timestamptz,
  CHECK (expires_at=issued_at+interval '60 seconds')
 );
+-- [구성] occupancy_windows 테이블: 입장 후 2시간을 기준으로 한 혼잡도 추정 구간를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE occupancy_windows (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  member_id bigint NOT NULL REFERENCES members,
@@ -421,6 +451,7 @@ CREATE TABLE occupancy_windows (
  EXCLUDE USING gist (member_id WITH =,tstzrange(starts_at,ends_at,'[)') WITH &&) WHERE (status='VALID')
 );
 -- 날짜 출석과 2시간 구간을 분리: 같은 구간에 자정 전후 두 날짜 방문을 연결할 수 있다.
+-- [구성] visits 테이블: 방문과 한국 날짜 기준 출석 기록를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE visits (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  member_id bigint NOT NULL REFERENCES members,
@@ -447,6 +478,7 @@ CREATE TABLE visits (
  CHECK (admission_kind<>'PT_ONLY' OR (pt_booking_id IS NOT NULL AND NOT reward_eligible))
 );
 CREATE UNIQUE INDEX one_visit_per_window_date ON visits(member_id,occupancy_window_id,attendance_date) WHERE status='VALID';
+-- [목적] checkin_requests 테이블: QR 입장 요청과 중복 처리 방지 정보를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE checkin_requests (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  device_id bigint NOT NULL REFERENCES checkin_devices,
@@ -463,6 +495,7 @@ CREATE TABLE checkin_requests (
 );
 CREATE UNIQUE INDEX one_qr_success ON checkin_requests(qr_credential_id)
  WHERE result_code IN ('SUCCESS','DUPLICATE');
+-- [구성] visit_revisions 테이블: 방문 기록 정정 이력를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE visit_revisions (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  visit_id bigint NOT NULL REFERENCES visits,
@@ -473,6 +506,7 @@ CREATE TABLE visit_revisions (
  changed_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- [구성] streak_states 테이블: 회원별 연속 출석 상태를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE streak_states (
  member_id bigint PRIMARY KEY REFERENCES members,
  count_days smallint NOT NULL DEFAULT 0 CHECK (count_days BETWEEN 0 AND 9),
@@ -481,6 +515,7 @@ CREATE TABLE streak_states (
  segment_no integer NOT NULL DEFAULT 1 CHECK (segment_no>0),
  version integer NOT NULL DEFAULT 1 CHECK (version>0)
 );
+-- [구성] streak_evaluations 테이블: 영업일별 연속 출석 판정과 재판정 버전를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE streak_evaluations (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  member_id bigint NOT NULL REFERENCES members,
@@ -499,6 +534,7 @@ CREATE TABLE streak_evaluations (
  CHECK (verdict<>'CLOSED_SKIP' OR count_before=count_after),
  CHECK (verdict NOT IN ('ABSENT','EXPIRY_RESET') OR count_after=0)
 );
+-- [구성] reward_awards 테이블: 출석 보상 지급 기록를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE reward_awards (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  member_id bigint NOT NULL,
@@ -515,6 +551,7 @@ CREATE TABLE reward_awards (
  FOREIGN KEY (evaluation_id,member_id) REFERENCES streak_evaluations(id,member_id),
  FOREIGN KEY (membership_id,member_id) REFERENCES memberships(id,member_id)
 );
+-- [구성] reward_reviews 테이블: 출석 보상 검토와 처리 기록를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE reward_reviews (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  member_id bigint NOT NULL REFERENCES members,
@@ -528,6 +565,7 @@ CREATE TABLE reward_reviews (
  operation_key text NOT NULL UNIQUE,
  created_at timestamptz NOT NULL DEFAULT now()
 );
+-- [구성] membership_adjustments 테이블: 시설 이용권 기간 조정 이력를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE membership_adjustments (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  membership_id bigint NOT NULL REFERENCES memberships,
@@ -554,6 +592,7 @@ CREATE TABLE membership_adjustments (
  CHECK (kind<>'REVERSAL' OR reversal_of_id IS NOT NULL)
 );
 CREATE UNIQUE INDEX one_reward_extension ON membership_adjustments(reward_award_id) WHERE kind='REWARD';
+-- [구성] pt_pass_adjustments 테이블: PT 이용권 조정 이력를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE pt_pass_adjustments (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  member_id bigint NOT NULL,
@@ -574,6 +613,7 @@ CREATE TABLE pt_pass_adjustments (
 );
 
 -- 일지 본문과 이력은 암호화한다. 민감정보 파기 시 동일 일지 키를 폐기해 이력/백업까지 읽을 수 없게 한다.
+-- [구성] pt_journals 테이블: 암호화된 PT 수업 일지를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE pt_journals (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  booking_id bigint NOT NULL UNIQUE,
@@ -591,6 +631,7 @@ CREATE TABLE pt_journals (
   OR (status<>'PURGED' AND body_ciphertext IS NOT NULL AND body_char_count BETWEEN 1 AND 5000
    AND body_char_count IS NOT NULL AND encryption_key_ref IS NOT NULL))
 );
+-- [구성] pt_journal_revisions 테이블: PT 수업 일지 수정 이력를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE pt_journal_revisions (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  journal_id bigint NOT NULL REFERENCES pt_journals,
@@ -605,6 +646,7 @@ CREATE TABLE pt_journal_revisions (
  CHECK ((redacted_at IS NULL AND body_ciphertext IS NOT NULL AND body_char_count IS NOT NULL AND body_char_count BETWEEN 1 AND 5000)
   OR (redacted_at IS NOT NULL AND body_ciphertext IS NULL AND body_char_count IS NULL))
 );
+-- [구성] content_incidents 테이블: 콘텐츠 관련 문제 접수와 처리 정보를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE content_incidents (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  journal_id bigint NOT NULL REFERENCES pt_journals,
@@ -616,6 +658,7 @@ CREATE TABLE content_incidents (
  resolved_at timestamptz
 );
 
+-- [구성] posts 테이블: 공지·소식 게시물를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE posts (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  type text NOT NULL CHECK (type IN ('NOTICE','TIP')),
@@ -631,6 +674,7 @@ CREATE TABLE posts (
  CHECK (NOT pinned OR type='NOTICE'),
  CHECK (status<>'PUBLISHED' OR published_at IS NOT NULL)
 );
+-- [구성] post_images 테이블: 게시물에 연결된 이미지를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE post_images (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  post_id bigint NOT NULL REFERENCES posts,
@@ -641,11 +685,13 @@ CREATE TABLE post_images (
  verified_at timestamptz NOT NULL,
  UNIQUE(post_id,position)
 );
+-- [구성] post_video_links 테이블: 게시물에 연결된 동영상 링크를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE post_video_links (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  post_id bigint NOT NULL REFERENCES posts,
  https_url text NOT NULL CHECK (https_url ~ '^https://[^[:space:]]+$')
 );
+-- [구성] post_revisions 테이블: 게시물 수정 이력를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE post_revisions (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  post_id bigint NOT NULL REFERENCES posts,
@@ -656,6 +702,7 @@ CREATE TABLE post_revisions (
  UNIQUE(post_id,version)
 );
 
+-- [구성] notification_types 테이블: 알림 종류 정의를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE notification_types (
  code text PRIMARY KEY,
  push_title text NOT NULL,
@@ -674,6 +721,7 @@ INSERT INTO notification_types VALUES
  ('CHANGE_RESPONSE','일정 알림','일정 변경 결과가 있습니다'),
  ('TRAINER_CHANGED','담당 알림','담당 변경 알림이 있습니다'),
  ('LESSON_UNRECORDED','수업 알림','수업 결과 확인이 필요합니다');
+-- [구성] notification_preferences 테이블: 계정별 알림 수신 설정를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE notification_preferences (
  account_id bigint NOT NULL REFERENCES accounts,
  type_code text NOT NULL REFERENCES notification_types,
@@ -681,6 +729,7 @@ CREATE TABLE notification_preferences (
  updated_at timestamptz NOT NULL DEFAULT now(),
  PRIMARY KEY(account_id,type_code)
 );
+-- [구성] push_devices 테이블: 푸시 알림 대상 기기를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE push_devices (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  account_id bigint NOT NULL REFERENCES accounts,
@@ -692,6 +741,7 @@ CREATE TABLE push_devices (
  last_seen_at timestamptz NOT NULL DEFAULT now()
 );
 -- 예정 이벤트는 아직 알림함에 보이지 않는다. 확정/도래 후 notifications로 물질화한다.
+-- [구성] notification_jobs 테이블: 아직 알림함에 표시하지 않은 예정 알림 작업를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE notification_jobs (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  recipient_account_id bigint NOT NULL REFERENCES accounts,
@@ -708,6 +758,7 @@ CREATE TABLE notification_jobs (
  status text NOT NULL CHECK (status IN ('PENDING','MATERIALIZED','CANCELLED','EXPIRED')),
  created_at timestamptz NOT NULL DEFAULT now()
 );
+-- [구성] notifications 테이블: 회원 알림함에 표시할 확정 알림를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE notifications (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  job_id bigint UNIQUE REFERENCES notification_jobs,
@@ -721,6 +772,7 @@ CREATE TABLE notifications (
  purge_after timestamptz NOT NULL,
  CHECK (purge_after<=visible_at+interval '90 days' AND purge_after>visible_at)
 );
+-- [구성] push_deliveries 테이블: 기기별 푸시 전송 상태와 재시도 정보를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE push_deliveries (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  notification_id bigint NOT NULL REFERENCES notifications,
@@ -736,6 +788,7 @@ CREATE TABLE push_deliveries (
  CHECK (stop_at<=first_scheduled_at+interval '30 minutes' AND stop_at>first_scheduled_at),
  CHECK (status<>'SENT' OR sent_at IS NOT NULL)
 );
+-- [구성] notification_attempts 테이블: 알림 전송 시도 이력를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE notification_attempts (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  delivery_id bigint NOT NULL REFERENCES push_deliveries,
@@ -748,6 +801,7 @@ CREATE TABLE notification_attempts (
 );
 
 -- 업무 로그에 개인정보 본문을 복사하지 않는다. 분리보존은 개별 근거와 기한을 가진다.
+-- [구성] audit_events 테이블: 계정 관리 등 업무 처리 감사 기록를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE audit_events (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  actor_account_id bigint REFERENCES accounts,
@@ -761,6 +815,7 @@ CREATE TABLE audit_events (
  purge_after timestamptz NOT NULL,
  CHECK (purge_after>occurred_at)
 );
+-- [구성] gym_private.access_logs 테이블: 개인정보 접근 기록를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE gym_private.access_logs (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  actor_ref text NOT NULL,
@@ -774,6 +829,7 @@ CREATE TABLE gym_private.access_logs (
  purge_after timestamptz NOT NULL,
  CHECK (purge_after>=occurred_at+make_interval(years=>retention_years))
 );
+-- [구성] gym_private.permission_history 테이블: 권한 변경 이력를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE gym_private.permission_history (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  actor_ref text NOT NULL,
@@ -784,6 +840,7 @@ CREATE TABLE gym_private.permission_history (
  purge_after timestamptz NOT NULL,
  CHECK (purge_after>=occurred_at+interval '3 years')
 );
+-- [구성] gym_private.retention_rules 테이블: 정보 분리 보존의 근거와 기간 규칙를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE gym_private.retention_rules (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  record_category text NOT NULL,
@@ -795,6 +852,7 @@ CREATE TABLE gym_private.retention_rules (
  approved_by_ref text NOT NULL,
  CHECK (length(trim(applicability_evidence_ref))>0)
 );
+-- [구성] gym_private.retained_records 테이블: 분리 보존 대상과 만료 상태를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE gym_private.retained_records (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  rule_id bigint NOT NULL REFERENCES gym_private.retention_rules,
@@ -810,6 +868,7 @@ CREATE TABLE gym_private.retained_records (
  CHECK ((status='RETAINED' AND payload_ciphertext IS NOT NULL AND key_ref IS NOT NULL)
   OR (status='DESTROYED' AND payload_ciphertext IS NULL AND key_ref IS NULL AND destroyed_at IS NOT NULL))
 );
+-- [구성] gym_private.deletion_requests 테이블: 개인정보 파기 요청를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE gym_private.deletion_requests (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  subject_ref text NOT NULL,
@@ -824,6 +883,7 @@ CREATE TABLE gym_private.deletion_requests (
  exception_end_condition text,
  CHECK (status<>'EXCEPTION' OR (exception_reason_code IS NOT NULL AND responsible_ref IS NOT NULL AND exception_end_condition IS NOT NULL))
 );
+-- [구성] gym_private.deletion_manifest 테이블: 파기 대상과 처리 결과 대장를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE gym_private.deletion_manifest (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  request_id bigint NOT NULL REFERENCES gym_private.deletion_requests,
@@ -837,6 +897,7 @@ CREATE TABLE gym_private.deletion_manifest (
  backup_purged_at timestamptz,
  UNIQUE(request_id,resource_type,opaque_resource_ref)
 );
+-- [구성] job_runs 테이블: 백그라운드 작업 실행 이력를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE job_runs (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  job_type text NOT NULL CHECK (job_type IN ('MIDNIGHT_STREAK','PT_SETTLEMENT','NOTIFICATIONS','PURGE','RESTORE_RECONCILIATION','CONGESTION')),
@@ -848,6 +909,7 @@ CREATE TABLE job_runs (
  error_code text
 );
 
+-- [기능] derive_visit_date 함수: 입장 시각에서 한국 시간 기준 출석 날짜를 계산합니다.
 CREATE FUNCTION derive_visit_date() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
  IF NEW.checked_in_at>clock_timestamp() THEN RAISE EXCEPTION 'Future attendance is not allowed'; END IF;
@@ -858,6 +920,7 @@ $$;
 CREATE TRIGGER visit_date BEFORE INSERT OR UPDATE OF checked_in_at ON visits
  FOR EACH ROW EXECUTE FUNCTION derive_visit_date();
 
+-- [기능] guard_journal 함수: 수업 일지 저장 시 연관 데이터와 상태 조건을 검증합니다.
 CREATE FUNCTION guard_journal() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE finish timestamptz;
 BEGIN
@@ -875,6 +938,7 @@ CREATE TRIGGER journal_guard BEFORE INSERT OR UPDATE ON pt_journals
 -- DB 소유자와 별개인 파기 작업 역할만 만료/탈퇴 대상 이력을 정정·삭제할 수 있다.
 -- 파기 작업 역할에 부여할 EXECUTE/테이블 권한은 실제 배포 역할에 맞춰 별도 구성한다.
 -- 존재하지 않는 역할을 조회하면 오류가 나므로 카탈로그에서 검증 후 확인한다.
+-- [기능] protect_history 함수: 이력 수정·삭제를 제한하고 별도 파기 권한 역할만 예외로 허용합니다.
 CREATE FUNCTION protect_history() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE purge_role oid;
 BEGIN
@@ -912,16 +976,20 @@ CREATE INDEX sessions_account ON account_sessions(account_id) WHERE revoked_at I
 CREATE INDEX access_log_purge ON gym_private.access_logs(purge_after);
 CREATE INDEX retained_record_purge ON gym_private.retained_records(retain_until) WHERE status='RETAINED';
 
+-- [기능] current_congestion 뷰: 현재 유효한 혼잡도 추정 구간의 회원을 중복 없이 셉니다. 실제 퇴장 인원과는 다를 수 있습니다.
 CREATE VIEW current_congestion AS
  SELECT count(DISTINCT member_id) AS estimated_members,statement_timestamp() AS calculated_at
  FROM occupancy_windows WHERE status='VALID'
  AND starts_at<=statement_timestamp() AND statement_timestamp()<ends_at;
+-- [기능] member_attendance_days 뷰: 유효 방문을 회원·날짜별로 묶어 하루 출석과 보상 자격을 집계합니다.
 CREATE VIEW member_attendance_days AS
  SELECT member_id,attendance_date,bool_or(reward_eligible) AS reward_eligible
  FROM visits WHERE status='VALID' GROUP BY member_id,attendance_date;
+-- [기능] pt_pass_balances 뷰: PT 잔여 횟수에서 예약 확보 횟수를 빼 추가 예약 가능 횟수를 제공합니다.
 CREATE VIEW pt_pass_balances AS
  SELECT id,member_id,starts_on,current_expires_on,balance,held_count,balance-held_count AS available_count,status
  FROM pt_passes;
+-- [기능] current_streak_evaluations 뷰: 회원·영업일별 가장 최신 버전의 연속 출석 판정을 조회합니다.
 CREATE VIEW current_streak_evaluations AS
  SELECT DISTINCT ON (member_id,business_date) * FROM streak_evaluations
  ORDER BY member_id,business_date,revision DESC;

@@ -1,3 +1,4 @@
+// [목적] attendancePreview.ts 파일: 출석 화면의 고정 예시 데이터입니다. 실제 회원의 출석 이력이나 서버가 계산한 보상이 아닙니다.
 import { homePreview } from './homePreview';
 
 /** Fixed 2026-11-12 design snapshot; never infer rewards from device dates. */

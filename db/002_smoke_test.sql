@@ -1,3 +1,4 @@
+-- [목적] 002_smoke_test.sql 파일: 스키마 적용 후 제약과 주요 동작을 확인하는 개발용 SQL입니다. 마지막 ROLLBACK으로 테스트 데이터 변경을 취소합니다.
 -- 신규 v1.0 스키마 적용 후 개발 DB에서만 실행. 실제 데이터 변경은 ROLLBACK.
 \set ON_ERROR_STOP on
 BEGIN;

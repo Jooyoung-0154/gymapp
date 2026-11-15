@@ -29,7 +29,8 @@
     "test:calendar": "node --experimental-strip-types --test scripts/attendance-calendar.test.mjs",
     "test:booking": "node --experimental-strip-types --test scripts/booking-preview.test.mjs",
     "export:web": "expo export --platform web",
-    "preview:web": "node scripts/preview-web.cjs"
+    "preview:web": "node scripts/preview-web.cjs",
+    "test:auth": "node --experimental-strip-types --test scripts/auth-api.test.mjs"
   },
   "private": true
 }

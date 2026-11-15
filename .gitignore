@@ -4,3 +4,14 @@
 !.env.example
 server/target/
 *.log
+
+node_modules/
+.expo/
+mobile/dist/
+mobile/web-build/
+*.tsbuildinfo
+*.pem
+*.key
+*.p12
+*.jks
+__pycache__/

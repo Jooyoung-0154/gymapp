@@ -1,3 +1,4 @@
+// [목적] AuthService.java 파일: 계정 로그인·운영자 추가 인증·회원 승인·일회용 코드·세션을 DB로 처리합니다. 변경 요청은 operation의 트랜잭션 안에서 실행됩니다.
 package kr.gym;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -25,6 +26,7 @@ public class AuthService {
         this.db=db;this.crypto=crypto;this.transactions=transactions;this.json=json;
         dummyHash=crypto.hashPassword(crypto.randomToken());
     }
+    // [목적] operation 메서드: 같은 범위·경로·요청 키를 잠가 중복 실행을 방지합니다. 본문이 같으면 암호화해 저장한 결과를 재사용합니다.
     public Reply operation(String scope,String path,String key,Map<String,Object> body,Supplier<Reply> action) {
         if(key==null || !key.matches("[A-Za-z0-9_-]{20,100}")) throw new ApiError(400,"REQUEST_KEY_REQUIRED","요청 식별자가 필요합니다. 화면을 새로 열어 주세요.");
         byte[] hash=crypto.fingerprint(encode(new TreeMap<>(body)));
@@ -44,23 +46,31 @@ public class AuthService {
             return reply;
         });
     }
+    // [기능] encode 메서드: 응답 또는 입력 객체를 JSON 문자열로 직렬화합니다.
     private String encode(Object value) { try{return json.writeValueAsString(value);}catch(Exception e){throw new IllegalStateException(e);} }
+    // [기능] lock 메서드: 트랜잭션 종료까지 같은 키의 처리를 직렬화하는 PostgreSQL 잠금을 획득합니다.
     private void lock(String key) { db.queryForList("SELECT pg_advisory_xact_lock(hashtextextended(?,0))",key); }
+    // [기능] publicScope 메서드: 비로그인 요청의 출처와 식별값을 HMAC으로 묶어 중복 요청 처리 범위를 만듭니다.
     public String publicScope(String source,Map<String,Object> body) {
         String identity=Objects.toString(body.getOrDefault("challengeId",body.getOrDefault("phone","anonymous")));
         return "public:"+crypto.fingerprintHex(source+":"+identity);
     }
+    // [기능] text 메서드: 필수 문자열의 타입·공백 여부·최대 길이를 검사합니다.
     static String text(Map<String,Object> body,String key,int max) {
         Object value=body.get(key);
         if(!(value instanceof String str) || str.isBlank() || str.length()>max) throw ApiError.invalid("입력한 내용을 확인해 주세요: "+key);
         return str;
     }
+    // [기능] id 메서드: 대상 ID가 허용된 양의 정수 문자열인지 확인합니다.
     static String id(String value) { if(!value.matches("[1-9][0-9]{0,18}")) throw new ApiError(404,"NOT_FOUND","대상을 찾을 수 없습니다.");return value; }
+    // [기능] live 메서드: 저장된 만료 시각이 현재보다 미래인지 검사합니다.
     static boolean live(Object timestamp) { return timestamp!=null && ((Timestamp)timestamp).toInstant().isAfter(Instant.now()); }
+    // [기능] account 메서드: 계정을 조회하며 행 잠금을 걸어 같은 계정의 동시 변경을 제어합니다.
     private Map<String,Object> account(String id) {
         var rows=db.queryForList("SELECT * FROM gym.accounts WHERE id=?::bigint FOR UPDATE",id(id));
         if(rows.isEmpty()) throw new ApiError(404,"NOT_FOUND","대상을 찾을 수 없습니다.");return rows.getFirst();
     }
+    // [기능] login 메서드: 전화번호·비밀번호·계정 상태와 실패 횟수를 검사합니다. 운영자는 추가 인증 도전을, 일반 회원은 세션을 발급받습니다.
     public Reply login(Map<String,Object> body,String source) {
         String phone;
         try {phone=SecurityTools.phone(text(body,"phone",40));}catch(ApiError e){throw ApiError.login();}
@@ -90,10 +100,13 @@ public class AuthService {
         }
         return session(row,false);
     }
+    // [기능] roles 메서드: 계정에 부여된 역할 목록을 조회합니다.
     private List<String> roles(String accountId) { return db.queryForList("SELECT role FROM gym.account_roles WHERE account_id=?::bigint ORDER BY role",String.class,accountId); }
+    // [기능] recordAttempt 메서드: 로그인 시도 결과와 검색용 지문을 기록합니다.
     private void recordAttempt(String accountId,byte[] fingerprint,byte[] source,boolean success) {
         db.update("INSERT INTO gym.login_attempts(account_id,login_fingerprint,source_fingerprint,succeeded,purge_after) VALUES(?::bigint,?,?,?,now()+interval '1 day')",accountId,fingerprint,source,success);
     }
+    // [기능] failed 메서드: 실패 시도를 기록하고 최근 실패가 기준에 도달하면 계정을 일시 잠급니다.
     private void failed(Map<String,Object> account,byte[] fingerprint,byte[] source) {
         String accountId=account==null?null:account.get("id").toString();
         recordAttempt(accountId,fingerprint,source,false);
@@ -102,6 +115,7 @@ public class AuthService {
             if(count>=5) db.update("UPDATE gym.accounts SET locked_until=now()+interval '15 minutes' WHERE id=?::bigint",accountId);
         }
     }
+    // [기능] verifyMfa 메서드: 운영자 인증 도전의 만료·사용 여부와 계정 상태를 확인하고 TOTP 성공 시 세션을 발급합니다.
     public Reply verifyMfa(Map<String,Object> body,String source) {
         String challenge=text(body,"challengeId",100),code=text(body,"totp",20);
         var rows=db.queryForList("SELECT * FROM gym.auth_challenges WHERE id_hash=? FOR UPDATE",crypto.fingerprint("challenge:"+challenge));
@@ -116,6 +130,7 @@ public class AuthService {
         db.update("UPDATE gym.auth_challenges SET used_at=now() WHERE id_hash=?",crypto.fingerprint("challenge:"+challenge));
         return session(account,true);
     }
+    // [목적] acceptTotp 메서드: 등록된 비밀키로 TOTP를 검증하고 마지막 사용 구간을 갱신해 같은 번호의 재사용을 막습니다.
     private boolean acceptTotp(String accountId,String code) {
         var rows=db.queryForList("SELECT * FROM gym.mfa_enrollments WHERE account_id=?::bigint AND confirmed_at IS NOT NULL AND revoked_at IS NULL FOR UPDATE",accountId);
         if(rows.isEmpty())return false;var row=rows.getFirst();
@@ -124,11 +139,13 @@ public class AuthService {
         if(step<0)return false;
         db.update("UPDATE gym.mfa_enrollments SET last_accepted_time_step=? WHERE id=?",step,row.get("id"));return true;
     }
+    // [기능] session 메서드: 무작위 세션 토큰을 발급합니다. DB에는 토큰의 HMAC을 저장하고 권한별 만료 시간을 적용합니다.
     private Reply session(Map<String,Object> account,boolean operator) {
         String token=crypto.randomToken();String privilege=operator?"OPERATOR":"STANDARD";
         db.update("INSERT INTO gym.account_sessions(account_id,token_hash,privilege,security_version,last_seen_at,expires_at,mfa_verified_at,reauthenticated_at) VALUES(?,?,?, ?,now(),now()+CASE WHEN ? THEN interval '12 hours' ELSE interval '30 days' END,CASE WHEN ? THEN now() ELSE NULL END,CASE WHEN ? THEN now() ELSE NULL END)",account.get("id"),crypto.fingerprint("session:"+token),privilege,account.get("security_version"),operator,operator,operator);
         return new Reply(200,Map.of("mfaRequired",false),token);
     }
+    // [목적] authenticate 메서드: 쿠키 토큰의 지문으로 유효 세션과 계정 상태를 조회하고 마지막 접근 시각을 갱신합니다.
     public Actor authenticate(String token) {
         if(token==null || token.length()>100)return null;
         var rows=db.queryForList("SELECT s.id session_id,s.account_id,s.privilege FROM gym.account_sessions s JOIN gym.accounts a ON a.id=s.account_id WHERE s.token_hash=? AND s.revoked_at IS NULL AND a.status='ACTIVE' AND s.security_version=a.security_version AND s.expires_at>now() AND s.last_seen_at>now()-CASE WHEN s.privilege='OPERATOR' THEN interval '30 minutes' ELSE interval '7 days' END AND (s.privilege<>'OPERATOR' OR (s.mfa_verified_at IS NOT NULL AND EXISTS(SELECT 1 FROM gym.mfa_enrollments m WHERE m.account_id=a.id AND m.revoked_at IS NULL AND m.confirmed_at IS NOT NULL)))",crypto.fingerprint("session:"+token));
@@ -138,17 +155,21 @@ public class AuthService {
         db.update("UPDATE gym.account_sessions SET last_seen_at=now() WHERE id=?",row.get("session_id"));
         return new Actor(id,row.get("session_id").toString(),roles);
     }
+    // [기능] me 메서드: 인증된 계정의 이름·전화번호를 복호화해 계정 정보 응답을 만듭니다.
     public Reply me(Actor actor) {
         var row=db.queryForMap("SELECT id,phone_ciphertext,display_name_ciphertext,status FROM gym.accounts WHERE id=?::bigint",actor.id);
         return Reply.ok(Map.of("accountId",actor.id,"name",crypto.decrypt((byte[])row.get("display_name_ciphertext")),"phone",crypto.decrypt((byte[])row.get("phone_ciphertext")),"roles",actor.roles,"status",row.get("status")));
     }
+    // [기능] members 메서드: 최신 회원 최대 100명을 조회해 운영자 목록에 필요한 정보로 변환합니다.
     public Reply members(Actor actor) {
         var rows=db.queryForList("SELECT a.id account_id,m.id member_id,a.phone_ciphertext,a.display_name_ciphertext,a.status account_status,m.status,a.security_version FROM gym.accounts a JOIN gym.members m ON m.account_id=a.id ORDER BY m.id DESC LIMIT 100");
         return Reply.ok(Map.of("items",rows.stream().map(this::memberView).toList()));
     }
+    // [기능] memberView 메서드: DB 행을 화면 응답으로 바꾸고 표시할 개인정보를 복호화합니다.
     private Map<String,Object> memberView(Map<String,Object> row) {
         return Map.of("accountId",row.get("account_id").toString(),"memberId",row.get("member_id").toString(),"name",crypto.decrypt((byte[])row.get("display_name_ciphertext")),"phone",crypto.decrypt((byte[])row.get("phone_ciphertext")),"status",row.get("status"),"accountStatus",row.get("account_status"),"version",row.get("security_version"));
     }
+    // [기능] register 메서드: 전화번호 중복과 본인 확인 조건을 검사한 후 대기 상태의 계정·회원·역할과 감사 기록을 만듭니다.
     public Reply register(Actor actor,Map<String,Object> body) {
         String name=text(body,"name",80).strip(),phone=SecurityTools.phone(text(body,"phone",40));
         if(!Boolean.TRUE.equals(body.get("age14Verified")))throw ApiError.invalid("만 14세 이상 본인 확인이 필요합니다.");
@@ -160,6 +181,7 @@ public class AuthService {
         audit(actor,"ACCOUNT",accountId.toString(),"REGISTER","MEMBER_REGISTERED");
         return new Reply(201,Map.of("accountId",accountId.toString(),"memberId",memberId.toString(),"name",name,"phone",phone,"status","PENDING","accountStatus","PENDING","version",1),null);
     }
+    // [목적] changeStatus 메서드: 예상 버전으로 동시 수정을 검사하고 회원 상태를 변경합니다. 보안 버전 증가와 세션 폐기로 이전 로그인을 무효화합니다.
     public Reply changeStatus(Actor actor,String accountId,Map<String,Object> body) {
         var row=account(accountId);String reason=text(body,"reason",1000),state=text(body,"status",20);
         if(!List.of("ACTIVE","SUSPENDED").contains(state))throw ApiError.invalid("승인 또는 정지를 선택해 주세요.");
@@ -174,6 +196,7 @@ public class AuthService {
         auditWithReason(actor,accountId,"STATUS_CHANGE","ADMIN_STATUS_CHANGED",reason);
         return Reply.ok(Map.of("accountId",accountId,"status",state,"version",((Number)row.get("security_version")).intValue()+1));
     }
+    // [기능] issueCode 메서드: 승인 회원과 운영자 재인증을 확인해 활성화 또는 재설정 코드를 발급합니다. 같은 목적의 이전 코드는 폐기합니다.
     public Reply issueCode(Actor actor,String accountId,Map<String,Object> body) {
         var row=account(accountId);text(body,"reason",1000);
         if(!Boolean.TRUE.equals(body.get("identityVerified")))throw ApiError.invalid("본인 확인 후 발급해 주세요.");
@@ -190,6 +213,7 @@ public class AuthService {
         auditWithReason(actor,accountId,"CODE_ISSUED","IDENTITY_VERIFIED",text(body,"reason",1000));
         return Reply.ok(Map.of("challengeId",issued.get("id").toString(),"code",code,"expiresAt",((Timestamp)issued.get("expires_at")).toInstant().toString()));
     }
+    // [기능] consumeCode 메서드: 일회용 코드와 만료·실패 횟수를 검증한 뒤 비밀번호를 설정하고 기존 세션을 종료합니다.
     public Reply consumeCode(Map<String,Object> body) {
         String challenge=id(text(body,"challengeId",19)),code=text(body,"code",100),password=text(body,"newPassword",256);SecurityTools.validatePassword(password);
         var rows=db.queryForList("SELECT account_id FROM gym.auth_codes WHERE id=?::bigint",challenge);
@@ -208,7 +232,9 @@ public class AuthService {
         audit(new Actor(accountId,"",List.of()),"ACCOUNT",accountId,"CODE_CONSUMED","PASSWORD_SET");
         return Reply.ok(Map.of("activated",true));
     }
+    // [기능] codeError 메서드: 일회용 코드 실패를 공통 안내 문구로 반환합니다.
     private ApiError codeError(){return new ApiError(422,"CODE_INVALID","코드가 올바르지 않거나 사용할 수 없습니다. 데스크에 재발급을 요청해 주세요.");}
+    // [기능] reauthenticate 메서드: 운영자의 비밀번호와 TOTP를 다시 확인해 민감 작업용 최근 인증 시각을 갱신합니다.
     public Reply reauthenticate(Actor actor,Map<String,Object> body) {
         var account=account(actor.id);
         if(live(account.get("locked_until")))throw new ApiError(429,"LOGIN_LIMITED","잠시 후 다시 시도해 주세요.");
@@ -219,13 +245,16 @@ public class AuthService {
         db.update("UPDATE gym.account_sessions SET reauthenticated_at=now() WHERE id=?::bigint",actor.sessionId);
         return Reply.ok(Map.of("reauthenticated",true));
     }
+    // [기능] logout 메서드: 현재 세션을 DB에서 폐기하고 브라우저 쿠키 삭제를 지시하는 응답을 반환합니다.
     public Reply logout(Actor actor) {
         db.update("UPDATE gym.account_sessions SET revoked_at=now() WHERE id=?::bigint",actor.sessionId);
         return new Reply(200,Map.of("loggedOut",true),"");
     }
+    // [기능] audit 메서드: 누가 어떤 대상을 처리했는지 개인정보 본문 없이 감사 이벤트로 기록합니다.
     private void audit(Actor actor,String target,String targetId,String action,String reason) {
         db.update("INSERT INTO gym.audit_events(actor_account_id,actor_type,target_type,target_id,action,reason_code,purge_after) VALUES(?::bigint,'ACCOUNT',?,?,?,?,now()+interval '1 year')",actor.id,target,targetId,action,reason);
     }
+    // [기능] auditWithReason 메서드: 감사 이벤트를 남기고 상세 처리 사유는 별도로 암호화해 저장합니다.
     private void auditWithReason(Actor actor,String accountId,String action,String reasonCode,String reason) {
         Long auditId=db.queryForObject("INSERT INTO gym.audit_events(actor_account_id,actor_type,target_type,target_id,action,reason_code,purge_after) VALUES(?::bigint,'ACCOUNT','ACCOUNT',?,?,?,now()+interval '1 year') RETURNING id",Long.class,actor.id,accountId,action,reasonCode);
         db.update("INSERT INTO gym.auth_action_reasons(audit_id,reason_ciphertext) VALUES(?,?)",auditId,crypto.encrypt(reason));

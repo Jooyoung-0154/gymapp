@@ -1,3 +1,4 @@
+// [목적] index.ts 파일: Expo가 App 컴포넌트를 앱의 진입점으로 등록하는 파일입니다.
 import { registerRootComponent } from 'expo';
 
 import App from './App';

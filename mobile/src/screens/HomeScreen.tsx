@@ -1,3 +1,4 @@
+// [목적] HomeScreen.tsx 파일: 혼잡도·이용권·출석 요약과 다음 예약을 보여 줍니다. 혼잡도와 이용권은 예시 데이터이며 QR 버튼도 안내만 표시합니다.
 import { StreakProgress } from '../components/StreakProgress';
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -47,10 +48,9 @@ export function HomeScreen({ onOpenBookings, onOpenAttendance, onOpenMy }: { onO
           onPress={onOpenMy}
         >
           <View style={styles.between}><Text style={styles.sectionTitle}>시설 이용권</Text><DesignIcon name="chevron" /></View>
-          <View style={styles.expiryGroup}>
-            <Text style={styles.caption}>만료일</Text>
-            <Text style={styles.expiryDate}>{data.membership.expiresOnLabel}<Text style={styles.until}>까지</Text></Text>
-            <Text style={styles.daysLeft}>D + {data.membership.remainingDays}일</Text>
+          <View style={styles.passBottom}>
+            <View style={styles.expiryGroup}><Text style={styles.expiryLabel}>만료일</Text><Text style={styles.passDate}>{data.membership.expiresOnLabel}까지</Text></View>
+            <View style={styles.remaining}><Text style={styles.expiryLabel}>남은 일수</Text><View style={styles.numberRow}><Text style={styles.remainingNumber}>{data.membership.remainingDays}</Text><Text style={[styles.numberUnit, styles.primaryText]}>일</Text></View></View>
           </View>
         </Pressable>
 
@@ -59,8 +59,7 @@ export function HomeScreen({ onOpenBookings, onOpenAttendance, onOpenMy }: { onO
           accessibilityRole="button" accessibilityLabel={`현재 연속 출석 예시 ${data.attendance.streakDays}일, 다음 보상까지 출석 ${data.attendance.daysUntilReward}일`}
           onPress={onOpenAttendance}
         >
-          <View style={styles.between}><Text style={styles.sectionTitle}>현재 연속 출석</Text><DesignIcon name="chevron" /></View>
-          <StreakProgress days={data.attendance.streakDays} />
+          <Text style={styles.sectionTitle}>현재 연속 출석</Text><View style={styles.streakRight}><StreakProgress days={data.attendance.streakDays} /><DesignIcon name="chevron" /></View>
         </Pressable>
 
         <Pressable
@@ -80,6 +79,7 @@ export function HomeScreen({ onOpenBookings, onOpenAttendance, onOpenMy }: { onO
   );
 }
 
+// [구성] styles 변수: 화면 요소의 색상·크기·간격을 정의합니다. 컴포넌트의 style 속성에서 이름으로 참조합니다.
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   header: { paddingHorizontal: 24, paddingBottom: 8, justifyContent: 'center', backgroundColor: '#F3E7D9', borderBottomWidth: 2, borderBottomColor: '#CBB099' },
@@ -102,13 +102,14 @@ const styles = StyleSheet.create({
   primaryPressed: { backgroundColor: colors.primaryPressed },
   cardPressed: { opacity: 0.72 },
   membership: { minHeight: 145, padding: 20, borderRadius: layout.cardRadius, backgroundColor: colors.card, gap: 12 },
-  expiryGroup: { gap: 2 }, until: { fontFamily: fonts.medium, fontSize: 14, color: colors.readableMuted }, daysLeft: { fontFamily: fonts.bold, fontSize: 14, lineHeight: 22, color: colors.primary },
-  expiryDate: { fontFamily: fonts.number, fontSize: 30, lineHeight: 42, color: colors.primary, letterSpacing: -1 },
+  passBottom: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12, marginTop: 6 }, passDate: { fontFamily: fonts.medium, fontSize: 15, lineHeight: 24, color: colors.ink }, remaining: { alignItems: 'flex-end', gap: 2 }, streakRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  expiryGroup: { gap: 0 }, expiryLabel: { fontFamily: fonts.regular, fontSize: 12, lineHeight: 16, color: colors.readableMuted }, until: { fontFamily: fonts.medium, fontSize: 14, color: colors.readableMuted }, daysLeft: { fontFamily: fonts.bold, fontSize: 14, lineHeight: 22, color: colors.primary },
+  expiryDate: { fontFamily: fonts.number, fontSize: 30, lineHeight: 36, color: colors.primary, letterSpacing: -1 },
   membershipSummary: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' },
   membershipDates: { gap: 4, flexShrink: 1 },
   remainingNumber: { fontFamily: fonts.number, fontSize: 38, lineHeight: 40, letterSpacing: -2, color: colors.primary, includeFontPadding: false },
   primaryText: { color: colors.primary },
-  attendance: { minHeight: 137, padding: 20, gap: 14, borderRadius: layout.cardRadius, backgroundColor: colors.card },
+  attendance: { minHeight: 76, paddingHorizontal: 20, paddingVertical: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, borderRadius: layout.cardRadius, backgroundColor: colors.card },
   attendanceSummary: { flexDirection: 'row', gap: 24, alignItems: 'center' },
   attendanceTitle: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6 },
   streakBadge: { minWidth: 68, minHeight: 58, paddingHorizontal: 12, flexDirection: 'row', gap: 5, alignItems: 'baseline', justifyContent: 'center', borderRadius: 100, backgroundColor: colors.background },

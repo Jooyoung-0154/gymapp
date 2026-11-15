@@ -1,3 +1,4 @@
+// [목적] preview-web.cjs 파일: 내보낸 dist 폴더를 127.0.0.1에서 제공하는 미리보기 서버입니다. 기본 포트는 8091이며 Expo 개발 서버와 별개입니다.
 // Serves only this project's exported React Native Web preview on loopback.
 const http = require('node:http');
 const fs = require('node:fs');

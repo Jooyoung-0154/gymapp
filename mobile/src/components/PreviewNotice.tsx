@@ -1,6 +1,10 @@
+// [목적] PreviewNotice.tsx 파일: 미리보기 동작의 안내 메시지를 모달로 표시합니다. notice가 없으면 안내를 표시하지 않습니다.
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, fonts } from '../theme/warmWellness';
+// [정의] PreviewMessage는 미리보기 안내창에 표시할 메시지 타입입니다.
+// [구성] title은 안내 제목 문자열, message는 안내 본문 문자열입니다.
+// [목적] PreviewNotice는 PreviewMessage 또는 null을 받아 안내창 표시 여부를 결정합니다.
 export type PreviewMessage = { title: string; message: string };
 export function PreviewNotice({ notice, onClose }: { notice: PreviewMessage | null; onClose: () => void }) {
   const insets = useSafeAreaInsets();
@@ -18,6 +22,7 @@ export function PreviewNotice({ notice, onClose }: { notice: PreviewMessage | nu
     </Modal>
   );
 }
+// [구성] styles 변수: 화면 요소의 색상·크기·간격을 정의합니다. 컴포넌트의 style 속성에서 이름으로 참조합니다.
 const styles = StyleSheet.create({
   overlay: { flex: 1, justifyContent: 'flex-end', alignItems: 'center', backgroundColor: colors.scrim },
   sheet: { width: '100%', maxWidth: 440, padding: 26, gap: 14, backgroundColor: colors.background, borderTopLeftRadius: 28, borderTopRightRadius: 28 },

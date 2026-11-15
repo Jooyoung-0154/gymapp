@@ -1,3 +1,4 @@
+// [목적] booking-preview.test.mjs 파일: 예시 예약 생성·변경·취소와 횟수·시간 제한 규칙을 확인하는 Node 테스트입니다.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { initialBookingState, availableCredits, heldCredits, applyBookingCommand, cancellationKind, canChange, slotState } from '../src/utils/bookingPreview.ts';

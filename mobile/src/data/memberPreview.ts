@@ -1,3 +1,4 @@
+// [목적] memberPreview.ts 파일: 이용권·담당 트레이너·소식·알림 등을 표시하기 위한 고정 예시 데이터입니다.
 export const memberPreview = {
   name: '김하늘', phone: '010-2486-4826', maskedPhone: '010-****-4826', memberNumber: 'GYM-00124',
   trainer: '이준호', trainerInitial: '준', gym: 'Test Gym App',

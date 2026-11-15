@@ -1,3 +1,4 @@
+// [목적] DevBootstrap.java 파일: 명시적으로 활성화한 로컬 개발 환경에서 운영자 계정과 시작 안내를 준비합니다. 기존 자격 증명 파일이 있으면 재사용합니다.
 package kr.gym;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -18,6 +19,7 @@ class DevBootstrap implements ApplicationRunner {
     private final JdbcTemplate db;private final SecurityTools crypto;private final ObjectMapper json;private final TransactionTemplate tx;
     private final Path file;private final boolean local;
     DevBootstrap(JdbcTemplate db,SecurityTools crypto,ObjectMapper json,TransactionTemplate tx,@Value("${gym.bootstrap-file}") String file,@Value("${gym.local}") boolean local){this.db=db;this.crypto=crypto;this.json=json;this.tx=tx;this.file=Path.of(file);this.local=local;}
+    // [처리 흐름] DevBootstrap.run 메서드: 로컬 모드에서만 초기 운영자와 추가 인증 정보를 준비하고 로컬 시작 안내 파일을 생성합니다.
     @Override public void run(ApplicationArguments arguments) throws Exception {
         if(!local)throw new IllegalStateException("Development bootstrap requires explicit local mode");
         Map<String,String> credentials;

@@ -1,3 +1,4 @@
+// [목적] AuthFlowTest.java 파일: 인증과 회원 관리 흐름을 검증하는 테스트입니다. 세부 조건은 각 테스트의 입력과 기대 결과를 함께 읽어 확인합니다.
 package kr.gym;
 
 import com.fasterxml.jackson.databind.*;
@@ -145,3 +146,5 @@ class AuthFlowTest {
         }
     }
 }
+
+

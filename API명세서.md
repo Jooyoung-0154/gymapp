@@ -194,3 +194,11 @@ Content-Type: application/json
 ## 9. 구현 인계 조건
 
 OpenAPI 기계 판독 스키마·각 요청의 필수/선택/null·열거값 전체·계약 테스트는 후속 개발 항목이다. 이 문서는 업무 API 초안이며 실행 가능한 서버나 완성된 OpenAPI로 간주하지 않는다. 기술 제안(세션 전달·재인증5분·본문 길이·연결코드 수명 등)은 개발 착수 시 확정해 스키마에 고정한다. 기기 연결코드는10분·5회 실패 폐기, 사용자 QR·세션과 분리하는 안을 제안한다. 새로운 법률 판단은 추가하지 않으며 보존 근거 확인은 요구사항 §10·12를 따른다.
+
+
+## 2026-11-15 구현 추가: 본인 월별 출석
+- GET /api/v1/me/attendance?month=YYYY-MM (AT04a): MEMBER 세션으로 본인만 조회한다.
+- 응답 data: memberId, month, attendanceDates(유효 방문 날짜별 중복 제거), attendanceCount, today(한국 기준), earliestMonth.
+- 클라이언트가 보내는 memberId/accountId는 조회 주체로 사용하지 않는다.
+- 잘못된 월·미래 월은 422, ACTIVE 회원 없음 404, 미로그인 401, 역할 불충족 403, DB 오류 503.
+- 연속 출석·보상 판정과 AT04의 운영자 조회는 이 엔드포인트 구현 범위 밖이다.

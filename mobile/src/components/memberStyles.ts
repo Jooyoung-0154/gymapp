@@ -1,5 +1,7 @@
+// [목적] memberStyles.ts 파일: 회원 화면들이 함께 사용하는 카드·버튼·문자·가로 배치 스타일입니다.
 import { StyleSheet } from 'react-native';
 import { colors, fonts, layout } from '../theme/warmWellness';
+// [구성] memberStyles 변수: 화면 요소의 색상·크기·간격을 정의합니다. 컴포넌트의 style 속성에서 이름으로 참조합니다.
 export const memberStyles = StyleSheet.create({
   card: { padding: 20, borderRadius: layout.cardRadius, backgroundColor: colors.card, gap: 14 },
   row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12 },

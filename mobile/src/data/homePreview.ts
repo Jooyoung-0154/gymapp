@@ -1,3 +1,4 @@
+// [목적] homePreview.ts 파일: 홈 디자인 확인용 고정 데이터입니다. 현재 헬스장 혼잡도나 실제 이용권 정보가 아닙니다.
 /** Fixed Figma example, NOT current gym information or an API response. */
 export const homePreview = {
   gymName: 'Test Gym App',

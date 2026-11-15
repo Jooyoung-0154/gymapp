@@ -1,3 +1,4 @@
+# [목적] validate_sql.py 파일: PostgreSQL 구문 분석기로 SQL·PL/pgSQL 문법과 외래 키 참조 구조를 검사합니다. 실제 DB에서 업무 흐름을 실행하는 검사는 아닙니다.
 """Optional development check: pip install pglast into ../.validation first."""
 from pathlib import Path
 import re
@@ -11,6 +12,7 @@ from pglast.enums import ConstrType
 schema_text = (root / 'db/001_schema.sql').read_text(encoding='utf-8')
 tables = {}
 foreign_keys = []
+# [처리 흐름] parse_sql(schema_text) 결과 순회: 파싱된 테이블 정의에서 열·기본 키·고유 키·외래 키 구조를 수집합니다.
 for raw in parse_sql(schema_text):
     stmt = raw.stmt
     if not isinstance(stmt, ast.CreateStmt):
@@ -37,6 +39,7 @@ for raw in parse_sql(schema_text):
             foreign_keys.append((name, local, target, remote))
     tables[name] = (columns, unique_keys, primary_key)
 
+# [처리 흐름] foreign_keys 목록 검증 반복문: 외래 키 대상 존재 여부와 열 개수·고유성 조건을 검증합니다.
 for source, local, target, remote in foreign_keys:
     assert target in tables, f'Unknown FK target: {source} -> {target}'
     assert set(local) <= tables[source][0], f'Unknown FK source columns: {source}, {local}'
@@ -46,6 +49,7 @@ for source, local, target, remote in foreign_keys:
     assert remote in tables[target][1], f'FK target lacks declared unique key: {target}, {remote}'
 print(f'FK structure: PASS ({len(foreign_keys)} references, target columns and declared unique keys)')
 
+# [처리 흐름] 스키마·스모크 테스트 파일 구문 검사 반복문: 스키마와 스모크 테스트의 SQL 및 함수·DO 블록 문법을 검사합니다.
 for name in ('001_schema.sql', '002_smoke_test.sql'):
     text = (root / 'db' / name).read_text(encoding='utf-8')
     text = '\n'.join(line for line in text.splitlines() if not line.startswith('\\'))

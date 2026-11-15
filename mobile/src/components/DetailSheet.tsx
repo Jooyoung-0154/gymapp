@@ -1,3 +1,4 @@
+// [목적] DetailSheet.tsx 파일: 제목·본문·하단 버튼을 전달받아 공통 상세 모달을 구성합니다. 닫기 처리는 호출한 화면에서 전달합니다.
 import type { ReactNode } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -17,6 +18,7 @@ export function DetailSheet({ visible, title, onClose, children, footer }: { vis
     </View>
   </Modal>;
 }
+// [구성] styles 변수: 화면 요소의 색상·크기·간격을 정의합니다. 컴포넌트의 style 속성에서 이름으로 참조합니다.
 const styles = StyleSheet.create({
   overlay: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 16, backgroundColor: colors.scrim },
   sheet: { width: '100%', maxWidth: 440, maxHeight: '90%', backgroundColor: colors.background, borderRadius: 28, paddingHorizontal: 24, paddingTop: 10 },

@@ -1,3 +1,4 @@
+// [목적] warmWellness.ts 파일: 공통 색상·글꼴·기준 화면 크기를 정의합니다. 여러 화면에서 가져와 디자인을 일관되게 유지합니다.
 /** Figma: 03 웜 웰니스 / 9:1631. Sizes are React Native logical points. */
 export const colors = {
   background: '#FAF5ED', canvas: '#EFEAE3', card: '#FFFCF7', congestion: '#F1DED0',

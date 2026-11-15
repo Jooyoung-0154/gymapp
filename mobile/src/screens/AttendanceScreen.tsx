@@ -1,25 +1,31 @@
+// [목적] AttendanceScreen은 로그인한 회원의 월별 실제 출석을 조회합니다. 보상 집계는 후속 구현입니다.
+import { CalendarLegend, marks } from '../components/CalendarLegend';
 import { calendarToday } from '../utils/calendarToday';
+import { useAttendance } from '../hooks/useAttendance';
 import { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { attendancePreview as data } from '../data/attendancePreview';
+
 import { homePreview } from '../data/homePreview';
-import { attendanceCount, calendarCells, monthKey, shiftMonth, type CalendarMonth } from '../utils/attendanceCalendar';
+import { calendarCells, monthKey, shiftMonth, type CalendarMonth } from '../utils/attendanceCalendar';
 import { colors, fonts, layout } from '../theme/warmWellness';
 
 const weekdays = ['일', '월', '화', '수', '목', '금', '토'];
-const attended = new Set<string>(data.attendanceDates);
+
 
 export function AttendanceScreen() {
   const insets = useSafeAreaInsets();
-  const today = calendarToday();
-  const [month, setMonth] = useState<CalendarMonth>({ ...data.snapshotMonth });
-  const cells = useMemo(() => calendarCells(month), [month]);
+  const initialToday = calendarToday();
+  const [month, setMonth] = useState<CalendarMonth>({ year: Number(initialToday.slice(0,4)), month: Number(initialToday.slice(5,7)) });
   const key = monthKey(month);
-  const latest = monthKey(data.snapshotMonth);
-  const canPrevious = key > monthKey(data.earliestMonth);
-  const canNext = key < latest;
-  const count = attendanceCount(data.attendanceDates, month);
+  const { data, error, loading, retry } = useAttendance(key);
+  const today = data?.today ?? initialToday;
+  const latest = today.slice(0,7);
+  const cells = useMemo(() => calendarCells(month), [month]);
+  const attended = new Set(data?.attendanceDates ?? []);
+  const canPrevious = !!data && key > data.earliestMonth;
+  const canNext = !loading && key < latest;
+  const count = data?.attendanceCount;
   const monthLabel = `${month.year}년 ${month.month}월`;
 
   return (
@@ -34,6 +40,9 @@ export function AttendanceScreen() {
         </View>
 
         <View style={styles.calendar}>
+          {loading && <ActivityIndicator color={colors.primary} accessibilityLabel="출석 조회 중" />}
+          {!!error && <View accessibilityRole="alert"><Text style={styles.empty}>{error}</Text><Pressable accessibilityRole="button" onPress={retry} style={styles.resetButton}><Text style={styles.resetLabel}>다시 불러오기</Text></Pressable></View>}
+          {!loading && !error && <Pressable accessibilityRole="button" onPress={retry}><Text style={styles.resetLabel}>출석 새로고침</Text></Pressable>}
           <View style={styles.monthControls}>
             <Pressable accessibilityRole="button" accessibilityLabel="이전 달" accessibilityState={{ disabled: !canPrevious }} disabled={!canPrevious} onPress={() => setMonth(current => shiftMonth(current, -1))} style={({ pressed }) => [styles.monthButton, !canPrevious && styles.disabled, pressed && styles.pressed]}>
               <Text style={styles.arrow} accessible={false}>‹</Text>
@@ -50,46 +59,45 @@ export function AttendanceScreen() {
             {cells.map((cell, index) => {
               const isAttended = cell.date !== null && attended.has(cell.date);
               return (
-                <View key={cell.key} style={styles.cell} accessible={cell.day !== null} accessibilityLabel={cell.day === null ? undefined : `${month.month}월 ${cell.day}일, ${isAttended ? '출석' : '출석 기록 없음'}${cell.date === today ? ', 오늘' : ''}`}>
-                  {cell.day !== null && <View style={[styles.dayCircle, isAttended && styles.attended, isAttended && (index % 7 === 0 || index % 7 === 6) && styles.weekendAttended, cell.date === today && styles.today]}>
-                    <Text style={[styles.dayNumber, isAttended && styles.attendedNumber, index % 7 === 0 && styles.sunday, index % 7 === 6 && styles.saturday]}>{cell.day}</Text>
+                <View key={cell.key} style={styles.cell} accessible={cell.day !== null} accessibilityLabel={cell.day === null ? undefined : `${month.month}월 ${cell.day}일, ${isAttended ? '출석' : data ? '출석 기록 없음' : '조회되지 않음'}${cell.date === today ? ', 오늘' : ''}`}>
+                  {cell.day !== null && <View style={[styles.dayCircle, isAttended && marks.attended, cell.date === today && marks.today]}>
+                    <Text style={[styles.dayNumber, index % 7 === 0 && styles.sunday, index % 7 === 6 && styles.saturday, cell.date === today && marks.todayNumber]}>{cell.day}</Text>
                   </View>}
                 </View>
               );
             })}
           </View>
-          <View style={styles.legend}>
-            <View style={styles.legendItem}><View style={styles.todayRing} /><Text style={styles.legendText}>오늘</Text></View>
-            <View style={styles.legendItem}><View style={styles.legendDot} /><Text style={styles.legendText}>출석</Text></View>
-          </View>
+          <CalendarLegend />
           {count === 0 && <Text accessibilityLiveRegion="polite" style={styles.empty}>이 달에는 출석 기록이 없어요.</Text>}
-          {key !== latest && <Pressable accessibilityRole="button" onPress={() => setMonth({ ...data.snapshotMonth })} style={({ pressed }) => [styles.resetButton, pressed && styles.pressed]}><Text style={styles.resetLabel}>현재 달력으로 돌아가기</Text></Pressable>}
+          {key !== latest && <Pressable accessibilityRole="button" onPress={() => setMonth({ year: Number(latest.slice(0,4)), month: Number(latest.slice(5,7)) })} style={({ pressed }) => [styles.resetButton, pressed && styles.pressed]}><Text style={styles.resetLabel}>현재 달력으로 돌아가기</Text></Pressable>}
         </View>
 
         <View style={styles.summary}>
-          <View style={styles.stat} accessible accessibilityLabel={`${key === latest ? '이번 달' : '선택한 달'} 출석 ${count}일`}>
+          <View style={styles.stat} accessible accessibilityLabel={`${key === latest ? '이번 달' : '선택한 달'} 출석 ${count ?? '조회 중'}일`}>
             <Text style={styles.statLabel}>{key === latest ? '이번 달 출석' : '선택한 달 출석'}</Text>
-            <View style={styles.numberRow}><Text style={styles.statNumber}>{count}</Text><Text style={styles.unit}>일</Text></View>
+            <View style={styles.numberRow}><Text style={styles.statNumber}>{count ?? '—'}</Text><Text style={styles.unit}>일</Text></View>
           </View>
           <View style={styles.divider} />
-          <View style={styles.stat} accessible accessibilityLabel={`현재 연속 출석 ${data.streakDays}일`}>
+          <View style={styles.stat} accessible accessibilityLabel="현재 연속 출석 집계 준비 중">
             <Text style={styles.statLabel}>현재 연속 출석</Text>
-            <View style={styles.numberRow}><Text style={styles.statNumber}>{data.streakDays}</Text><Text style={styles.unit}>일</Text></View>
+            <View style={styles.numberRow}><Text style={styles.statNumber}>—</Text><Text style={styles.unit}>일</Text></View>
           </View>
         </View>
 
         <View style={styles.reward}>
           <Text style={styles.rewardTitle}>누적 보상 확인</Text>
           <View style={styles.rewardRule}><Text style={styles.rewardRuleText}>10일 연속 출석 시</Text><View style={styles.rewardHighlight}><Text style={styles.rewardHighlightText}>이용일 1일</Text></View><Text style={styles.rewardRuleText}>추가</Text></View>
-          <View style={styles.rewardRow}><Text style={styles.rewardLabel}>누적 보상</Text><Text style={styles.rewardValue}>{data.cumulativeRewardDays}일</Text></View>
-          <View style={styles.rewardRow}><Text style={styles.rewardLabel}>다음 보상까지</Text><Text style={styles.rewardValue}>출석 {data.daysUntilReward}일</Text></View>
-          <Text style={styles.policy}>휴무와 휴회일은 개근 진행을 보존해요. (회원 신청 휴회는 개근 보존이 되지 않아요.)</Text>
+          <View style={styles.rewardRow}><Text style={styles.rewardLabel}>누적 보상</Text><Text style={styles.rewardValue}>집계 준비 중</Text></View>
+          <View style={styles.rewardRow}><Text style={styles.rewardLabel}>다음 보상까지</Text><Text style={styles.rewardValue}>집계 준비 중</Text></View>
+          <Text style={styles.policy}>연속 출석과 보상은 집계 기능 연결 후 표시돼요.</Text>
+          <Text style={styles.policy}>회원 신청 휴회는 개근 보존이 되지 않아요.</Text>
         </View>
       </ScrollView>
     </View>
   );
 }
 
+// [구성] styles 변수: 화면 요소의 색상·크기·간격을 정의합니다. 컴포넌트의 style 속성에서 이름으로 참조합니다.
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   header: { paddingHorizontal: 24, paddingBottom: 8, justifyContent: 'center', backgroundColor: '#F3E7D9', borderBottomWidth: 2, borderBottomColor: '#CBB099' },
@@ -109,7 +117,7 @@ const styles = StyleSheet.create({
   sunday: { color: '#C44336' }, saturday: { color: '#2E63B8' }, weekendAttended: { backgroundColor: '#F1E2D6', borderColor: colors.primary },
   grid: { flexDirection: 'row', flexWrap: 'wrap' },
   cell: { width: `${100 / 7}%`, minHeight: 44, paddingVertical: 3, alignItems: 'center', justifyContent: 'center' },
-  dayCircle: { width: '100%', maxWidth: 36, minHeight: 36, alignItems: 'center', justifyContent: 'center', borderRadius: 20, borderWidth: 1, borderColor: 'transparent' },
+  dayCircle: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', borderRadius: 20, borderWidth: 1, borderColor: 'transparent' },
   attended: { backgroundColor: colors.primary },
   snapshot: { outlineColor: colors.primary, outlineWidth: 1, outlineOffset: 2 },
   dayNumber: { fontFamily: fonts.number, fontSize: 13, lineHeight: 24, color: colors.ink },
@@ -141,3 +149,5 @@ const styles = StyleSheet.create({
   policy: { fontFamily: fonts.regular, fontSize: 11, lineHeight: 18, color: colors.readableMuted, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12 },
   example: { fontFamily: fonts.regular, fontSize: 11, lineHeight: 19, color: colors.readableMuted, paddingHorizontal: 4 },
 });
+
+
