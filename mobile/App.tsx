@@ -1,15 +1,29 @@
 // [목적] App.tsx 파일: 앱의 시작 화면입니다. 글꼴과 안전 영역을 준비하고, 로그인 확인 결과에 따라 로그인 화면 또는 회원 탭을 보여 줍니다.
+import { accountDestination } from './src/utils/authDestination';
 import { useFonts } from 'expo-font';
 import { StatusBar } from 'expo-status-bar';
 import { ActivityIndicator, Platform, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from './src/state/AuthContext';
+import { AccountSetupScreen } from './src/screens/AccountSetupScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { MemberTabs } from './src/navigation/MemberTabs';
 import { colors, layout } from './src/theme/warmWellness';
+import { AppRouter } from './src/navigation/AppRouter';
+import { Navigate, Route, Routes, useLocation } from './src/navigation/router';
+import { OperatorGate } from './src/navigation/OperatorGate';
+import { AdminLayout } from './src/screens/AdminLayout';
+import { AdminMembersScreen } from './src/screens/AdminMembersScreen';
+import { adminSections } from './src/utils/adminNavigation';
+import { EntryQrScreen } from './src/screens/EntryQrScreen';
+import { AdminCheckinScreen } from './src/screens/AdminCheckinScreen';
+import { AdminFacilitySettingsScreen } from './src/screens/AdminFacilitySettingsScreen';
 
 // [기능] App 함수: 글꼴 로딩이 끝나면 인증 제공자를 연결합니다. 웹의 넓은 화면에서는 휴대폰 크기 프레임을 사용합니다.
 export default function App() {
+  return <AppRouter><ApplicationFrame /></AppRouter>;
+}
+function ApplicationFrame() {
   const [loaded, error] = useFonts({
     NotoSansKR_400Regular: require('@expo-google-fonts/noto-sans-kr/400Regular/NotoSansKR_400Regular.ttf'),
     NotoSansKR_500Medium: require('@expo-google-fonts/noto-sans-kr/500Medium/NotoSansKR_500Medium.ttf'),
@@ -18,11 +32,12 @@ export default function App() {
   });
   const window = useWindowDimensions();
   const desktop = Platform.OS === 'web' && window.width >= 600;
+  const admin = useLocation().pathname.startsWith('/admin');
   return (
     <SafeAreaProvider>
       <StatusBar style="dark" />
       <View style={[styles.canvas, desktop && styles.desktopCanvas]}>
-        <View style={[styles.frame, !desktop && styles.fullFrame, desktop && { width: layout.referenceWidth, height: Math.min(layout.referenceHeight, window.height - 48), flexShrink: 0, borderRadius: 28, borderWidth: 1, borderColor: colors.border }]}>
+        <View style={[styles.frame, !desktop && styles.fullFrame, desktop && { width: admin ? Math.min(1120, window.width - 48) : layout.referenceWidth, height: admin ? window.height - 48 : Math.min(layout.referenceHeight, window.height - 48), flexShrink: 0, borderRadius: admin ? 18 : 28, borderWidth: 1, borderColor: colors.border }]}>
           {!loaded && !error ? <View style={styles.loading}><ActivityIndicator color={colors.primary} accessibilityLabel="화면 준비 중" /></View>
             : error ? <View style={styles.loading}><Text style={styles.error}>글꼴을 준비하지 못했어요.{'\n'}앱을 다시 열어 주세요.</Text></View>
             : <AuthProvider><AuthenticatedApp desktop={desktop} /></AuthProvider>}
@@ -45,5 +60,17 @@ const styles = StyleSheet.create({
 function AuthenticatedApp({ desktop }: { desktop: boolean }) {
   const { account, checking } = useAuth();
   if (checking) return <View style={styles.loading}><ActivityIndicator color={colors.primary} accessibilityLabel="로그인 확인 중" /></View>;
-  return account ? <MemberTabs desktopPreview={desktop} /> : <LoginScreen />;
+  const destination = accountDestination(account);
+  if (destination === 'nickname') return <AccountSetupScreen />;
+  if (destination === 'login') return <LoginScreen />;
+  return <Routes>
+    <Route path="/" element={<MemberTabs desktopPreview={desktop} />} />
+    <Route path="/entry-qr" element={account?.roles.includes('MEMBER') ? <EntryQrScreen /> : <Navigate to="/" replace />} />
+    <Route path="/admin" element={<OperatorGate account={account} fallback={<Navigate to="/" replace />}><AdminLayout /></OperatorGate>}>
+      <Route index element={<Navigate to="members" replace />} />
+      {adminSections.map(section => <Route key={section.key} path={section.segment} element={section.key === 'checkin' ? <AdminCheckinScreen /> : section.key === 'settings' ? <AdminFacilitySettingsScreen /> : <AdminMembersScreen key={section.key} section={section.key} />} />)}
+      <Route path="*" element={<Navigate to="/admin/members" replace />} />
+    </Route>
+    <Route path="*" element={<Navigate to="/" replace />} />
+  </Routes>;
 }

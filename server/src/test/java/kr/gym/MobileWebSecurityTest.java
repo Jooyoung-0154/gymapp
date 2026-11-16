@@ -21,6 +21,31 @@ class MobileWebSecurityTest {
     @Autowired MockMvc mvc;
     @MockitoBean AuthService service;
     @MockitoBean AttendanceService attendance;
+    @MockitoBean CheckinService checkin;
+    @MockitoBean FacilityService facility;
+
+    @Test void qrIssuanceRequiresMemberAndScannerRequiresOperator() throws Exception {
+        assertThat(mvc.perform(get("/api/v1/occupancy")).andReturn().getResponse().getStatus()).isEqualTo(401);
+        var member=new AuthService.Actor("17","7",List.of("MEMBER"));
+        var operator=new AuthService.Actor("18","8",List.of("OPERATOR"));
+        when(service.authenticate("qr-member")).thenReturn(member);
+        when(service.authenticate("qr-operator")).thenReturn(operator);
+        when(checkin.issue(member)).thenReturn(AuthService.Reply.ok(Map.of("credentialId","42")));
+        when(checkin.registerDevice(operator)).thenReturn(AuthService.Reply.ok(Map.of("deviceId","9")));
+        when(service.operation(anyString(),anyString(),anyString(),anyMap(),any())).thenAnswer(inv->((java.util.function.Supplier<?>)inv.getArgument(4)).get());
+        var csrfResponse=mvc.perform(get("/api/v1/auth/csrf")).andReturn().getResponse();
+        Cookie csrfCookie=csrfResponse.getCookie("XSRF-TOKEN");
+        String token=new com.fasterxml.jackson.databind.ObjectMapper().readTree(csrfResponse.getContentAsString()).at("/data/token").asText();
+        var issue=post("/api/v1/me/qr").header("X-XSRF-TOKEN",token).cookie(csrfCookie).header("Idempotency-Key","qr-issuance-security-test-001").contentType("application/json").content("{}");
+        assertThat(mvc.perform(issue.cookie(new Cookie("GYM_SESSION","qr-member"))).andReturn().getResponse().getStatus()).isEqualTo(200);
+        var forbiddenIssue=post("/api/v1/me/qr").header("X-XSRF-TOKEN",token).cookie(csrfCookie).contentType("application/json").content("{}").cookie(new Cookie("GYM_SESSION","qr-operator"));
+        assertThat(mvc.perform(forbiddenIssue).andReturn().getResponse().getStatus()).isEqualTo(403);
+        var scan=post("/api/v1/admin/checkins").header("X-XSRF-TOKEN",token).cookie(csrfCookie).contentType("application/json").content("{}").cookie(new Cookie("GYM_SESSION","qr-member"));
+        assertThat(mvc.perform(scan).andReturn().getResponse().getStatus()).isEqualTo(403);
+        verify(checkin,never()).consume(any(),anyMap(),anyString());
+        var register=post("/api/v1/admin/checkin-devices").header("X-XSRF-TOKEN",token).cookie(csrfCookie).header("Idempotency-Key","qr-device-security-test-0001").contentType("application/json").content("{}").cookie(new Cookie("GYM_SESSION","qr-operator"));
+        assertThat(mvc.perform(register).andReturn().getResponse().getStatus()).isEqualTo(200);
+    }
 
     @Test void expoOriginReceivesCredentialedCorsHeaders() throws Exception {
         var response=mvc.perform(options("/api/v1/auth/login")

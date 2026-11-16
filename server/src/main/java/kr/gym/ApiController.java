@@ -20,7 +20,9 @@ class ApiController {
     private final ObjectMapper json;
     private final boolean secure;
     private final AttendanceService attendance;
-    ApiController(AuthService service,AttendanceService attendance,ObjectMapper json,@Value("${gym.cookie-secure}") boolean secure){this.service=service;this.attendance=attendance;this.json=json;this.secure=secure;}
+    private final CheckinService checkin;
+    private final FacilityService facility;
+    ApiController(AuthService service,AttendanceService attendance,CheckinService checkin,FacilityService facility,ObjectMapper json,@Value("${gym.cookie-secure}") boolean secure){this.service=service;this.attendance=attendance;this.checkin=checkin;this.facility=facility;this.json=json;this.secure=secure;}
     // [처리 흐름] /auth/csrf GET API 처리: 클라이언트가 변경 요청에 넣을 CSRF 토큰과 헤더 이름을 조회합니다.
     @GetMapping("/auth/csrf") ResponseEntity<?> csrf(CsrfToken token){return response(AuthService.Reply.ok(Map.of("token",token.getToken(),"headerName",token.getHeaderName())));}
     // [처리 흐름] /me GET API 처리: 보안 필터에서 검증된 계정의 내 정보를 조회합니다.
@@ -31,8 +33,12 @@ class ApiController {
     }
     // [처리 흐름] /admin/members GET API는 운영자 권한으로 회원 목록을 조회합니다.
     @GetMapping("/admin/members") ResponseEntity<?> members(Authentication auth){return response(service.members((AuthService.Actor)auth.getPrincipal()));}
+    @GetMapping("/me/membership") ResponseEntity<?> membership(Authentication auth){return response(service.membership((AuthService.Actor)auth.getPrincipal()));}
+    @GetMapping("/occupancy") ResponseEntity<?> occupancy(){return response(facility.occupancy());}
+    @GetMapping("/admin/facility-settings") ResponseEntity<?> facilitySettings(){return response(facility.settings());}
+    @GetMapping("/me/qr/{credentialId}") ResponseEntity<?> qrStatus(Authentication auth,@PathVariable String credentialId){return response(checkin.status((AuthService.Actor)auth.getPrincipal(),credentialId));}
     // [기능] ApiController.command 메서드: 변경 요청을 공통 진입점에서 읽고 업무 경로에 맞는 서비스 함수를 호출합니다.
-    @PostMapping({"/auth/login","/auth/mfa/verify","/auth/code/consume","/auth/logout","/auth/reauthenticate","/admin/members","/admin/accounts/{id}/status","/admin/accounts/{id}/codes"})
+    @PostMapping({"/auth/register","/me/nickname","/auth/login","/auth/mfa/verify","/auth/code/consume","/auth/logout","/auth/reauthenticate","/admin/members","/admin/accounts/{id}/status","/admin/accounts/{id}/codes","/admin/accounts/{id}/membership","/me/qr","/admin/checkin-devices","/admin/checkins","/admin/facility-settings"})
     ResponseEntity<?> command(HttpServletRequest request,Authentication authentication,@PathVariable(required=false) String id) throws IOException {
         // [처리 흐름] ApiController.command의 bytes 본문 길이 검사: 본문은 8KB까지만 허용합니다. 한 바이트 더 읽어 한도 초과 여부를 판별합니다.
         byte[] bytes=request.getInputStream().readNBytes(8193);
@@ -46,13 +52,19 @@ class ApiController {
         String scope=actor==null?service.publicScope(source,body):"account:"+actor.id();
         String target=id;
         return response(service.operation(scope,path,request.getHeader("Idempotency-Key"),body,()->switch(path){
+            case "/auth/register" -> service.requestRegistration(body);
+            case "/me/nickname" -> service.setNickname(actor,body);
             case "/auth/login" -> service.login(body,source);
             case "/auth/mfa/verify" -> service.verifyMfa(body,source);
             case "/auth/code/consume" -> service.consumeCode(body);
             case "/auth/logout" -> service.logout(actor);
             case "/auth/reauthenticate" -> service.reauthenticate(actor,body);
             case "/admin/members" -> service.register(actor,body);
-            default -> path.endsWith("/status")?service.changeStatus(actor,target,body):service.issueCode(actor,target,body);
+            case "/me/qr" -> checkin.issue(actor);
+            case "/admin/checkin-devices" -> checkin.registerDevice(actor);
+            case "/admin/checkins" -> checkin.consume(actor,body,request.getHeader("Idempotency-Key"));
+            case "/admin/facility-settings" -> facility.saveSettings(actor,body);
+            default -> path.endsWith("/membership")?service.registerMembership(actor,target,body):path.endsWith("/status")?service.changeStatus(actor,target,body):service.issueCode(actor,target,body);
         }));
     }
     // [기능] response 메서드: 성공·실패 JSON 형식을 통일하고 세션 발급·삭제 쿠키 및 캐시 금지 헤더를 설정합니다.

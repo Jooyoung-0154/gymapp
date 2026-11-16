@@ -14,7 +14,11 @@ if "%~1"=="--check" (
   "%GYM_PWSH%" -NoProfile -Command "$PSVersionTable.PSVersion.ToString()"
   exit /b
 )
-"%GYM_PWSH%" -NoProfile -File "%~dp0tools\start-app.ps1"
+if "%~1"=="--verify" (
+  "%GYM_PWSH%" -NoProfile -File "%~dp0tools\start-app.ps1" -Verify
+) else (
+  "%GYM_PWSH%" -NoProfile -File "%~dp0tools\start-app.ps1"
+)
 set "GYM_EXIT=%ERRORLEVEL%"
 echo.
 echo Application stopped. Exit code: %GYM_EXIT%

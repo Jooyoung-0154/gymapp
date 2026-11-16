@@ -45,9 +45,8 @@ class AuthFlowTest {
     Cookie operator() throws Exception {
         var login=postJson("/auth/login",Map.of("phone",phone,"password",password),null);
         assertThat(login.getResponse().getStatus()).isEqualTo(200);
-        var mfa=postJson("/auth/mfa/verify",Map.of("challengeId",data(login).path("challengeId").asText(),"totp",SecurityTools.totp(secret,Instant.now())),null);
-        assertThat(mfa.getResponse().getStatus()).isEqualTo(200);
-        return session(mfa);
+        assertThat(data(login).path("mfaRequired").asBoolean()).isFalse();
+        return session(login);
     }
     JsonNode register(Cookie admin,String memberPhone) throws Exception {
         var result=postJson("/admin/members",Map.of("name","TEST 회원","phone",memberPhone,"age14Verified",true),admin);
@@ -60,6 +59,73 @@ class AuthFlowTest {
     JsonNode code(Cookie admin,JsonNode member) throws Exception {
         var result=postJson("/admin/accounts/"+member.path("accountId").asText()+"/codes",Map.of("purpose","ACTIVATE","identityVerified",true,"reason","시험 본인확인"),admin);
         assertThat(result.getResponse().getStatus()).isEqualTo(200);return data(result);
+    }
+    // [목적] 실제 DB를 사용해 회원 가입·승인·닉네임·이용권 등록·본인 조회와 기간 중복 거부를 검증합니다.
+    @Test void facilityMembershipRegistrationAndOwnership() throws Exception {
+        Cookie admin=operator();
+        String memberPhone="010"+String.format("%08d",new Random().nextInt(100000000));
+        var loginBody=Map.<String,Object>of("phone",memberPhone,"password",password);
+        assertThat(postJson("/auth/register",loginBody,null).getResponse().getStatus()).isEqualTo(201);
+        var items=data(mvc.perform(get("/api/v1/admin/members").cookie(admin)).andReturn()).path("items");
+        JsonNode member=null;
+        for(var item:items) if(item.path("phone").asText().equals(memberPhone)) member=item;
+        assertThat(member).isNotNull();
+        String accountId=member.path("accountId").asText();
+        var dates=Map.<String,Object>of("startsOn","2026-12-01","expiresOn","2026-12-31");
+        String path="/admin/accounts/"+accountId+"/membership";
+        assertThat(postJson(path,dates,admin).getResponse().getStatus()).isEqualTo(409);
+        approve(admin,member);
+        Cookie user=session(postJson("/auth/login",loginBody,null));
+        assertThat(postJson("/me/nickname",Map.of("nickname","이용권검증회원"),user).getResponse().getStatus()).isEqualTo(200);
+        assertThat(data(mvc.perform(get("/api/v1/me/membership").cookie(user)).andReturn()).path("registered").asBoolean()).isFalse();
+        assertThat(postJson(path,dates,user).getResponse().getStatus()).isEqualTo(403);
+        assertThat(postJson(path,dates,null).getResponse().getStatus()).isEqualTo(401);
+        assertThat(postJson(path,Map.of("startsOn","2026-12-31","expiresOn","2026-12-01"),admin).getResponse().getStatus()).isEqualTo(422);
+        String key=UUID.randomUUID().toString();
+        var created=postJson(path,dates,admin,key);
+        assertThat(created.getResponse().getStatus()).isEqualTo(201);
+        assertThat(data(postJson(path,dates,admin,key))).isEqualTo(data(created));
+        assertThat(postJson(path,dates,admin).getResponse().getStatus()).isEqualTo(409);
+        var mine=mvc.perform(get("/api/v1/me/membership").param("accountId",operatorId).cookie(user)).andReturn();
+        assertThat(mine.getResponse().getStatus()).isEqualTo(200);
+        assertThat(data(mine).path("registered").asBoolean()).isTrue();
+        assertThat(data(mine).path("startsOn").asText()).isEqualTo("2026-12-01");
+        assertThat(data(mine).path("expiresOn").asText()).isEqualTo("2026-12-31");
+        assertThat(data(mvc.perform(get("/api/v1/me/membership").cookie(admin)).andReturn()).path("registered").asBoolean()).isFalse();
+        String otherPhone="010"+String.format("%08d",new Random().nextInt(100000000));
+        var other=register(admin,otherPhone); approve(admin,other);
+        var issued=code(admin,other);
+        assertThat(postJson("/auth/code/consume",Map.of("challengeId",issued.path("challengeId").asText(),"code",issued.path("code").asText(),"newPassword",password),null).getResponse().getStatus()).isEqualTo(200);
+        Cookie second=session(postJson("/auth/login",Map.of("phone",otherPhone,"password",password),null));
+        assertThat(data(mvc.perform(get("/api/v1/me/membership").param("accountId",accountId).cookie(second)).andReturn()).path("registered").asBoolean()).isFalse();
+    }
+    @Test void selfRegistrationApprovalAndNickname() throws Exception {
+        String memberPhone="010"+String.format("%08d",new Random().nextInt(100000000));
+        var body=Map.<String,Object>of("phone",memberPhone,"password",password);
+        var registration=postJson("/auth/register",body,null);
+        assertThat(registration.getResponse().getStatus()).isEqualTo(201);
+        assertThat(data(registration).path("approvalPending").asBoolean()).isTrue();
+        assertThat(postJson("/auth/register",body,null).getResponse().getStatus()).isEqualTo(409);
+        var pending=postJson("/auth/login",body,null);
+        assertThat(data(pending).path("approvalPending").asBoolean()).isTrue();
+        assertThat(pending.getResponse().getHeaders("Set-Cookie")).noneMatch(h->h.startsWith("GYM_SESSION="));
+        assertThat(postJson("/me/nickname",Map.of("nickname","새회원"),null).getResponse().getStatus()).isEqualTo(401);
+        Cookie admin=operator();
+        var members=mvc.perform(get("/api/v1/admin/members").cookie(admin)).andReturn();
+        JsonNode member=null;
+        for(var item:data(members).path("items"))if(item.path("phone").asText().equals(memberPhone))member=item;
+        assertThat(member).isNotNull();
+        var approved=postJson("/admin/accounts/"+member.path("accountId").asText()+"/status",Map.of("status","ACTIVE","expectedVersion",member.path("version").asInt()),admin);
+        assertThat(approved.getResponse().getStatus()).isEqualTo(200);
+        Cookie login=session(postJson("/auth/login",body,null));
+        var me=data(mvc.perform(get("/api/v1/me").cookie(login)).andReturn());
+        assertThat(me.path("nicknameRequired").asBoolean()).isTrue();
+        assertThat(postJson("/me/nickname",Map.of("nickname","a"),login).getResponse().getStatus()).isEqualTo(422);
+        var saved=postJson("/me/nickname",Map.of("nickname","운동회원"),login);
+        assertThat(saved.getResponse().getStatus()).isEqualTo(200);
+        assertThat(data(saved).path("nicknameRequired").asBoolean()).isFalse();
+        assertThat(data(saved).path("name").asText()).isEqualTo("운동회원");
+        assertThat(postJson("/me/nickname",Map.of("nickname","다른이름"),login).getResponse().getStatus()).isEqualTo(409);
     }
     @Test void registrationActivationLoginMeAndLogout() throws Exception {
         Cookie admin=operator(); JsonNode member=register(admin,"010"+String.format("%08d",new Random().nextInt(100000000)));
@@ -76,14 +142,12 @@ class AuthFlowTest {
         assertThat(postJson("/auth/logout",Map.of(),user).getResponse().getStatus()).isEqualTo(200);
         assertThat(mvc.perform(get("/api/v1/me").cookie(user)).andReturn().getResponse().getStatus()).isEqualTo(401);
     }
-    @Test void mutationRequiresCsrfAndOperatorMfa() throws Exception {
+    @Test void mutationRequiresCsrfAndOperatorPasswordLogin() throws Exception {
         assertThat(mvc.perform(post("/api/v1/auth/login").contentType("application/json").content("{}")).andReturn().getResponse().getStatus()).isEqualTo(403);
         assertThat(postJson("/admin/members",Map.of(),null).getResponse().getStatus()).isEqualTo(401);
-        var login=postJson("/auth/login",Map.of("phone",phone,"password",password),null);
-        assertThat(data(login).path("mfaRequired").asBoolean()).isTrue();
-        assertThat(login.getResponse().getHeaders("Set-Cookie")).noneMatch(h->h.startsWith("GYM_SESSION="));
-        var failed=postJson("/auth/mfa/verify",Map.of("challengeId",data(login).path("challengeId").asText(),"totp","invalid"),null);
-        assertThat(failed.getResponse().getStatus()).isEqualTo(401);
+        db.update("DELETE FROM gym.mfa_enrollments WHERE account_id=?::bigint",operatorId);
+        Cookie admin=operator();
+        assertThat(mvc.perform(get("/api/v1/admin/members").cookie(admin)).andReturn().getResponse().getStatus()).isEqualTo(200);
     }
     @Test void duplicatePhoneAndIdempotencyAreEnforced() throws Exception {
         Cookie admin=operator();String memberPhone="010"+String.format("%08d",new Random().nextInt(100000000)),key=UUID.randomUUID().toString();
@@ -119,15 +183,6 @@ class AuthFlowTest {
         assertThat(mvc.perform(get("/api/v1/me").cookie(user)).andReturn().getResponse().getStatus()).isEqualTo(401);
         db.update("UPDATE gym.account_sessions SET created_at=now()-interval '2 hours',last_seen_at=now()-interval '1 hour',expires_at=now()+interval '10 hours' WHERE account_id=?::bigint",operatorId);
         assertThat(mvc.perform(get("/api/v1/me").cookie(admin)).andReturn().getResponse().getStatus()).isEqualTo(401);
-    }
-    @Test void mfaChallengeCannotBeReusedAndExpires() throws Exception {
-        var login=postJson("/auth/login",Map.of("phone",phone,"password",password),null);String challenge=data(login).path("challengeId").asText();
-        var body=Map.<String,Object>of("challengeId",challenge,"totp",SecurityTools.totp(secret,Instant.now()));
-        assertThat(postJson("/auth/mfa/verify",body,null).getResponse().getStatus()).isEqualTo(200);
-        assertThat(postJson("/auth/mfa/verify",body,null).getResponse().getStatus()).isEqualTo(401);
-        var next=postJson("/auth/login",Map.of("phone",phone,"password",password),null);String nextId=data(next).path("challengeId").asText();
-        db.update("UPDATE gym.auth_challenges SET expires_at=now()-interval '1 second' WHERE id_hash=?",crypto.fingerprint("challenge:"+nextId));
-        assertThat(postJson("/auth/mfa/verify",Map.of("challengeId",nextId,"totp",SecurityTools.totp(secret,Instant.now())),null).getResponse().getStatus()).isEqualTo(401);
     }
     @Test void concurrentRegistrationAndActivationOnlyCommitOnce() throws Exception {
         Cookie admin=operator();String memberPhone="010"+String.format("%08d",new Random().nextInt(100000000));

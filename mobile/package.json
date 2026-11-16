@@ -14,7 +14,8 @@
     "react-dom": "19.3.0",
     "react-native": "0.88.1",
     "react-native-safe-area-context": "~5.10.1",
-    "react-native-web": "^0.21.2"
+    "react-native-web": "^0.21.2",
+    "react-router": "^7.15.1"
   },
   "devDependencies": {
     "@types/react": "~19.3.0",
@@ -30,7 +31,9 @@
     "test:booking": "node --experimental-strip-types --test scripts/booking-preview.test.mjs",
     "export:web": "expo export --platform web",
     "preview:web": "node scripts/preview-web.cjs",
-    "test:auth": "node --experimental-strip-types --test scripts/auth-api.test.mjs"
+    "test:auth": "node --experimental-strip-types --test scripts/auth-api.test.mjs",
+    "test:admin": "node --experimental-strip-types --test scripts/admin-navigation.test.mjs",
+    "test:qr": "node --experimental-strip-types --test scripts/entry-qr.test.mjs"
   },
   "private": true
 }

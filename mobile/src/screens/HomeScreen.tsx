@@ -1,56 +1,65 @@
-// [목적] HomeScreen.tsx 파일: 혼잡도·이용권·출석 요약과 다음 예약을 보여 줍니다. 혼잡도와 이용권은 예시 데이터이며 QR 버튼도 안내만 표시합니다.
+import { useOccupancy } from '../hooks/useOccupancy';
+import { useNavigate } from '../navigation/router';
+import { useAuth } from '../state/AuthContext';
+import { useMembership } from '../hooks/useMembership';
+// [목적] HomeScreen.tsx 파일: 혼잡도·이용권·출석 요약과 다음 예약을 보여 줍니다. 혼잡도·이용권·QR은 실제 API를 사용하고 연속 출석·예약 요약은 예시입니다.
 import { StreakProgress } from '../components/StreakProgress';
-import { useState } from 'react';
+
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DesignIcon } from '../components/DesignIcon';
-import { PreviewNotice, type PreviewMessage } from '../components/PreviewNotice';
+
 import { homePreview as data } from '../data/homePreview';
 import { colors, fonts, layout } from '../theme/warmWellness';
 import { useBookingPreview } from '../state/BookingPreviewContext';
 import { heldCredits, dateLabel, endTime, startsAt } from '../utils/bookingPreview';
 
-export function HomeScreen({ onOpenBookings, onOpenAttendance, onOpenMy }: { onOpenBookings: () => void; onOpenAttendance: () => void; onOpenMy: () => void }) {
+export function HomeScreen({ onOpenBookings, onOpenAttendance, onOpenMy, active = true }: { active?: boolean; onOpenBookings: () => void; onOpenAttendance: () => void; onOpenMy: () => void }) {
+  const membership = useMembership(active);
+  const occupancy = useOccupancy(active);
+  const navigate = useNavigate();
+  const { account } = useAuth();
+  const member = account?.roles.includes('MEMBER') ?? false;
   const insets = useSafeAreaInsets();
   const { state } = useBookingPreview();
   const nextBooking = state.bookings.filter(b => b.status === 'scheduled').sort((a, b) => startsAt(a) - startsAt(b))[0];
   const nextBookingLabel = nextBooking ? `${dateLabel(nextBooking.date)} ${nextBooking.time}–${endTime(nextBooking.time)}` : '예정된 예약이 없어요';
-  const [notice, setNotice] = useState<PreviewMessage | null>(null);
-  const showNotice = (title: string, message: string) => setNotice({ title, message });
+
+
 
   return (
     <View style={styles.screen}>
       <View style={[styles.header, { paddingTop: insets.top + 8, minHeight: insets.top + 76 }]}>
         <Text style={styles.gymName} accessibilityRole="header">{data.gymName}</Text>
       </View>
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} contentInsetAdjustmentBehavior="never" accessibilityLabel="홈 화면, 예시 데이터">
-        <View style={styles.congestion} accessible accessibilityLabel={`혼잡도 ${data.congestion.label}, 약 ${data.congestion.people}명. 2시간 내 입장 인원입니다.`}>
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} contentInsetAdjustmentBehavior="never" accessibilityLabel="홈 화면">
+        <View style={styles.congestion} accessible accessibilityLabel={`혼잡도 ${occupancy.label}, 약 ${occupancy.people}명. 2시간 내 입장 인원입니다.`}>
           <Text style={styles.sectionTitle}>현재 혼잡도</Text>
           <View style={styles.between}>
-            <View style={styles.badge}><View style={styles.badgeDot} /><Text style={styles.badgeText}>{data.congestion.label}</Text></View>
-            <View style={styles.numberRow}><Text style={styles.numberUnit}>약</Text><Text style={styles.peopleNumber}>{data.congestion.people}</Text><Text style={styles.numberUnit}>명</Text></View>
+            <View style={styles.badge}><View style={styles.badgeDot} /><Text style={styles.badgeText}>{occupancy.label}</Text></View>
+            <View style={styles.numberRow}><Text style={styles.numberUnit}>약</Text><Text style={styles.peopleNumber}>{occupancy.people}</Text><Text style={styles.numberUnit}>명</Text></View>
           </View>
-          <Text style={styles.congestionCaption}>2시간 내 입장 인원</Text>
+          <Text style={styles.congestionCaption}>{occupancy.caption}</Text>
         </View>
 
         <Pressable
           style={({ pressed }) => [styles.qrButton, pressed && styles.primaryPressed]}
-          accessibilityRole="button" accessibilityLabel="입장용 개인 QR 보기"
-          accessibilityHint="디자인 미리보기 안내를 엽니다. 실제 입장 QR은 발급하지 않습니다."
-          onPress={() => showNotice('입장용 개인 QR', '지금은 홈 디자인을 확인하는 미리보기예요. 실제 입장용 QR은 발급되지 않아요.')}
+          accessibilityRole="button" accessibilityLabel={member ? '입장용 개인 QR 보기' : '관리자 입장 확인'}
+          accessibilityHint={member ? '일회용 입장 QR 화면을 엽니다.' : '운영자의 QR 입장 확인 화면을 엽니다.'}
+          onPress={() => navigate(member ? '/entry-qr' : '/admin/checkin')}
         >
-          <DesignIcon name="scan" /><Text style={styles.qrLabel}>입장용 개인 QR 보기</Text><DesignIcon name="arrow" />
+          <DesignIcon name="scan" /><Text style={styles.qrLabel}>{member ? '입장용 개인 QR 보기' : '관리자 입장 확인'}</Text><DesignIcon name="arrow" />
         </Pressable>
 
         <Pressable
           style={({ pressed }) => [styles.membership, pressed && styles.cardPressed]}
-          accessibilityRole="button" accessibilityLabel={`시설 이용권, 예시 잔여 ${data.membership.remainingDays}일, 만료일 ${data.membership.expiresOnLabel}`}
+          accessibilityRole="button" accessibilityLabel={`시설 이용권, 잔여 ${membership.remainingDays}일, 만료일 ${membership.expiresOn}`}
           onPress={onOpenMy}
         >
           <View style={styles.between}><Text style={styles.sectionTitle}>시설 이용권</Text><DesignIcon name="chevron" /></View>
-          <View style={styles.passBottom}>
-            <View style={styles.expiryGroup}><Text style={styles.expiryLabel}>만료일</Text><Text style={styles.passDate}>{data.membership.expiresOnLabel}까지</Text></View>
-            <View style={styles.remaining}><Text style={styles.expiryLabel}>남은 일수</Text><View style={styles.numberRow}><Text style={styles.remainingNumber}>{data.membership.remainingDays}</Text><Text style={[styles.numberUnit, styles.primaryText]}>일</Text></View></View>
+          <Text style={styles.congestionCaption}>{membership.label}</Text><View style={styles.passBottom}>
+            <View style={styles.expiryGroup}><Text style={styles.expiryLabel}>만료일</Text><Text style={styles.passDate}>{membership.expiresOn}</Text></View>
+            <View style={styles.remaining}><Text style={styles.expiryLabel}>남은 일수</Text><View style={styles.numberRow}><Text style={styles.remainingNumber}>{membership.remainingDays}</Text><Text style={[styles.numberUnit, styles.primaryText]}>일</Text></View></View>
           </View>
         </Pressable>
 
@@ -74,7 +83,7 @@ export function HomeScreen({ onOpenBookings, onOpenAttendance, onOpenMy }: { onO
         </Pressable>
       </ScrollView>
 
-      <PreviewNotice notice={notice} onClose={() => setNotice(null)} />
+
     </View>
   );
 }

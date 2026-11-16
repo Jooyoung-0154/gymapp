@@ -17,7 +17,9 @@ const types = { '.html': 'text/html; charset=utf-8', '.js': 'application/javascr
 const server = http.createServer((request, response) => {
   try {
     const url = new URL(request.url, `http://127.0.0.1:${port}`);
-    const relative = decodeURIComponent(url.pathname);
+    const requested = decodeURIComponent(url.pathname);
+    const appRoutes = new Set(['/entry-qr', '/admin', '/admin/members', '/admin/approvals', '/admin/memberships', '/admin/checkin', '/admin/settings']);
+    const relative = appRoutes.has(requested.replace(/\/$/, '')) ? '/index.html' : requested;
     const file = path.resolve(root, '.' + (relative === '/' ? '/index.html' : relative));
     if (!file.startsWith(root + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
       response.writeHead(404); response.end('Not found'); return;

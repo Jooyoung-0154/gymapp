@@ -106,8 +106,7 @@ CREATE TABLE account_sessions (
  mfa_verified_at timestamptz,
  revoked_at timestamptz,
  CHECK (last_seen_at >= created_at),
- CHECK (expires_at = created_at + CASE privilege WHEN 'OPERATOR' THEN interval '12 hours' ELSE interval '30 days' END),
- CHECK (privilege <> 'OPERATOR' OR mfa_verified_at IS NOT NULL)
+ CHECK (expires_at = created_at + CASE privilege WHEN 'OPERATOR' THEN interval '12 hours' ELSE interval '30 days' END)
 );
 -- [구성] login_attempts 테이블: 로그인 성공·실패 기록과 시도 제한용 지문를 저장합니다. 외래 키는 연결 대상, CHECK·UNIQUE는 허용 조건을 제한합니다.
 CREATE TABLE login_attempts (

@@ -13,6 +13,7 @@ export type Account = {
   accountId: string;
   // [정의] Account.name은 화면에서 사용자에게 표시하는 계정 이름입니다.
   name: string;
+  nicknameRequired?: boolean;
   // [정의] Account.phone은 서버에서 받은 사용자의 전화번호입니다. 화면의 마스킹 처리는 별도로 수행합니다.
   phone: string;
   // [구성] Account.roles는 MEMBER·OPERATOR 등 계정에 부여된 권한 이름의 배열입니다.
@@ -42,7 +43,7 @@ export class ApiError extends Error {
 /** Cookies stay in the platform cookie store; passwords/tokens are never saved in JS storage. */
 // [기능] createAuthApi 함수: 서버 주소와 전송 함수를 받아 인증 요청 객체를 만듭니다. 전송 함수를 바꿔 테스트할 수 있습니다.
 export function createAuthApi(baseUrl: string, transport: typeof fetch = fetch) {
-  async function request<T>(path: string, body?: object): Promise<T> {
+  async function request<T>(path: string, body?: object, commandKey?: string): Promise<T> {
     const controller = new AbortController();
     // [구성] timer 변수: 15초 후 이 요청을 중단합니다. 성공·실패와 관계없이 finally에서 타이머를 정리합니다.
     const timer = setTimeout(() => controller.abort(), 15000);
@@ -54,7 +55,7 @@ export function createAuthApi(baseUrl: string, transport: typeof fetch = fetch) 
         headers[csrf.headerName] = csrf.token;
         headers['Content-Type'] = 'application/json';
         // [처리 흐름] request 함수의 headers['Idempotency-Key']: 변경 요청 식별자를 만들어 서버의 중복 처리 검사에 전달합니다. 이 코드는 자동 재시도를 수행하지 않습니다.
-        headers['Idempotency-Key'] = 'mobile-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2) + '-' + Math.random().toString(36).slice(2);
+        headers['Idempotency-Key'] = commandKey ?? makeCommandKey();
       }
       const response = await transport(baseUrl.replace(/\/$/, '') + '/api/v1' + path, {
         method: body === undefined ? 'GET' : 'POST', credentials: 'include',
@@ -72,9 +73,35 @@ export function createAuthApi(baseUrl: string, transport: typeof fetch = fetch) 
   return {
     me: () => request<Account>('/me'),
     attendance: (month: string) => request<AttendanceMonth>('/me/attendance?month=' + encodeURIComponent(month)),
-    login: (phone: string, password: string) => request<{ mfaRequired?: boolean }>('/auth/login', { phone, password }),
+    login: (phone: string, password: string) => request<{ mfaRequired?: boolean; challengeId?: string; approvalPending?: boolean }>('/auth/login', { phone, password }),
+    register: (phone: string, password: string) => request('/auth/register', { phone, password }),
+    verifyMfa: (challengeId: string, totp: string) => request('/auth/mfa/verify', { challengeId, totp }),
+    nickname: (nickname: string) => request<Account>('/me/nickname', { nickname }),
+    members: () => request<{ items: MemberSummary[] }>('/admin/members'),
+    membership: () => request<Membership>('/me/membership'),
+    issueQr: () => request<EntryQr>('/me/qr', {}),
+    qrStatus: (credentialId: string) => request<{ used: boolean; expired: boolean; revoked: boolean }>('/me/qr/' + encodeURIComponent(credentialId)),
+    occupancy: () => request<Occupancy>('/occupancy'),
+    registerScanner: () => request<{ deviceId: string }>('/admin/checkin-devices', {}),
+    checkin: (deviceId: string, qrToken: string, key: string) => request<CheckinResult>('/admin/checkins', { deviceId, qrToken }, key),
+    facilitySettings: () => request<FacilitySettings>('/admin/facility-settings'),
+    saveFacilitySettings: (settings: FacilitySettings) => request<FacilitySettings>('/admin/facility-settings', settings),
+    registerMembership: (accountId: string, startsOn: string, expiresOn: string) => request('/admin/accounts/' + accountId + '/membership', { startsOn, expiresOn }),
+    approve: (member: MemberSummary) => request('/admin/accounts/' + member.accountId + '/status', { status: 'ACTIVE', expectedVersion: member.version }),
     logout: () => request('/auth/logout', {}),
   };
 }
 
 
+
+export type MemberSummary = { accountId: string; name: string; phone: string; status: string; accountStatus: string; version: number };
+// [정의] Membership은 본인의 시설 이용권입니다. 미등록 상태에는 날짜가 없습니다.
+export type Membership = { registered: boolean; startsOn?: string; expiresOn?: string; remainingDays?: number; status?: 'ACTIVE' | 'SCHEDULED' | 'EXPIRED' };
+// [정의] QR 토큰은 회원 화면의 메모리에만 보관하며 로그·URL·기기 저장소에 저장하지 않습니다.
+export type EntryQr = { credentialId: string; token: string; serverTime: string; expiresAt: string; refreshAfterSeconds: number };
+export type Occupancy = { people: number; level: 'QUIET' | 'NORMAL' | 'CROWDED' | 'UNCONFIGURED'; serverTime: string; refreshSeconds: number; staleSeconds: number };
+export type CheckinResult = { accepted: boolean; duplicate: boolean; memberName: string; attendanceDate: string; checkedInAt: string; visitId: string; admissionKind: string };
+export type OpeningHours = { weekday: number; closed: boolean; opensAt: string; closesAt: string; overnight: boolean };
+export type FacilitySettings = { name: string; normalFrom: number | null; crowdedFrom: number | null; hours: OpeningHours[] };
+// [기능] 변경 요청 식별자는 통신 오류 후 같은 요청을 재전송할 때 재사용할 수 있습니다.
+export function makeCommandKey() { return 'mobile-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2) + '-' + Math.random().toString(36).slice(2); }

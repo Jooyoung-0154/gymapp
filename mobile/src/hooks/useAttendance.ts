@@ -4,13 +4,14 @@ import { authApi } from '../api/client';
 import { ApiError, type AttendanceMonth } from '../api/authApi';
 import { useAuth } from '../state/AuthContext';
 
-export function useAttendance(month: string) {
+export function useAttendance(month: string, visible = true) {
   const { expireSession } = useAuth();
   const [result, setResult] = useState<AttendanceMonth | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [revision, setRevision] = useState(0);
   useEffect(() => {
+    if (!visible) return;
     let active = true;
     setLoading(true); setError(''); setResult(null);
     authApi.attendance(month).then(data => {
@@ -22,6 +23,6 @@ export function useAttendance(month: string) {
     }).finally(() => { if (active) setLoading(false); });
     // [목적] 월을 빨리 바꾸거나 로그아웃하면 이전 응답이 새 달·다른 회원 화면에 반영되지 않게 합니다.
     return () => { active = false; };
-  }, [month, revision, expireSession]);
+  }, [month, revision, expireSession, visible]);
   return { data: result?.month === month ? result : null, error, loading, retry: () => setRevision(value => value + 1) };
 }

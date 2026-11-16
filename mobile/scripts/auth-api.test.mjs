@@ -55,3 +55,34 @@ test('attendance failure is reported rather than converted into empty history', 
   const api = createAuthApi('http://localhost:8080', async () => json({ error: { code: 'SERVICE_UNAVAILABLE', message: '잠시 후 다시 시도해 주세요.' } }, 503));
   await assert.rejects(api.attendance('2026-11'), e => e.status === 503 && e.code === 'SERVICE_UNAVAILABLE');
 });
+
+// 가입·승인·닉네임 설정이 같은 API와 계정 상태로 연결되는지 검증합니다.
+test('registration, approval, MFA and nickname use the common API', async () => {
+  const commands = [];
+  const api = createAuthApi('http://localhost:8080', async (url, options) => {
+    if (url.endsWith('/csrf')) return json({ data: { token: 'csrf', headerName: 'X-XSRF-TOKEN' } });
+    commands.push({ path: new URL(url).pathname, body: JSON.parse(options.body) });
+    return json({ data: { approvalPending: true } });
+  });
+  assert.equal((await api.register('01000000000', 'TestPassword123')).approvalPending, true);
+  await api.approve({ accountId: '42', version: 3 });
+  await api.verifyMfa('challenge', '123456');
+  await api.nickname('운동회원');
+  assert.deepEqual(commands, [
+    { path: '/api/v1/auth/register', body: { phone: '01000000000', password: 'TestPassword123' } },
+    { path: '/api/v1/admin/accounts/42/status', body: { status: 'ACTIVE', expectedVersion: 3 } },
+    { path: '/api/v1/auth/mfa/verify', body: { challengeId: 'challenge', totp: '123456' } },
+    { path: '/api/v1/me/nickname', body: { nickname: '운동회원' } },
+  ]);
+});
+
+test('common app routes members through nickname setup and retains operator separation', async () => {
+  const { accountDestination } = await import('../src/utils/authDestination.ts');
+  const account = { accountId: '42', name: '', phone: '01000000000', roles: ['MEMBER'], status: 'ACTIVE', nicknameRequired: true };
+  assert.equal(accountDestination(null), 'login');
+  assert.equal(accountDestination(account), 'nickname');
+  assert.equal(accountDestination({ ...account, nicknameRequired: false, name: '운동회원' }), 'member');
+  assert.equal(accountDestination({ ...account, roles: ['OPERATOR'] }), 'operator');
+  assert.equal(accountDestination({ ...account, roles: ['OPERATOR', 'MEMBER'] }), 'operator');
+  assert.equal(accountDestination({ ...account, roles: ['TRAINER'] }), 'login');
+});

@@ -1,3 +1,4 @@
+import { useMembership } from '../hooks/useMembership';
 // [목적] MyPageScreen.tsx 파일: 이름·전화번호와 로그아웃은 실제 인증 정보를 사용합니다. 이용권·소식·알림과 예약은 예시 데이터 또는 앱 내부 상태입니다.
 import { useAuth } from '../state/AuthContext';
 import { useState } from 'react';
@@ -17,7 +18,8 @@ import { colors, fonts } from '../theme/warmWellness';
 type Menu = 'profile' | 'membership' | 'pt' | 'pause' | 'pause-help' | 'journals' | 'news' | 'notifications' | 'settings' | 'password' | 'logout' | 'withdraw';
 const titles: Record<Menu, string> = { profile: '회원정보', membership: '시설 이용권', pt: 'PT 이용권', pause: '휴회 신청 및 내역', 'pause-help': '휴회 신청 안내', journals: 'PT 완료 일지', news: '소식', notifications: '알림함', settings: '알림 설정', password: '비밀번호 변경', logout: '로그아웃', withdraw: '회원 탈퇴 안내' };
 
-export function MyPageScreen({ onOpenBookings }: { onOpenBookings: () => void }) {
+export function MyPageScreen({ onOpenBookings, active = true }: { active?: boolean; onOpenBookings: () => void }) {
+  const membership = useMembership(active);
   const { state } = useBookingPreview();
   const { account, logout } = useAuth();
   const [logoutBusy, setLogoutBusy] = useState(false);
@@ -64,7 +66,7 @@ export function MyPageScreen({ onOpenBookings }: { onOpenBookings: () => void })
     </Pressable>
     <Pressable accessibilityRole="button" accessibilityLabel="시설 이용권 상세" onPress={() => open('membership')} style={({ pressed }) => [styles.membershipCard, pressed && ui.pressed]}>
       <View style={ui.row}><Text style={ui.title}>시설 이용권</Text><DesignIcon name="chevron" /></View>
-      <View style={styles.passBottom}><View style={styles.expiryGroup}><Text style={styles.expiryLabel}>만료일</Text><Text style={styles.passDate}>{member.membership.expiresOn}까지</Text></View><View style={styles.remaining}><Text style={styles.expiryLabel}>남은 일수</Text><Text style={styles.remainingValue}>{member.membership.remainingDays}<Text style={styles.unit}>일</Text></Text></View></View>
+      <View style={styles.passBottom}><View style={styles.expiryGroup}><Text style={styles.expiryLabel}>만료일</Text><Text style={styles.passDate}>{membership.expiresOn}</Text></View><View style={styles.remaining}><Text style={styles.expiryLabel}>남은 일수</Text><Text style={styles.remainingValue}>{membership.remainingDays}<Text style={styles.unit}>일</Text></Text></View></View>
     </Pressable>
     <Pressable accessibilityRole="button" accessibilityLabel="PT 이용권 상세" onPress={() => open('pt')} style={({ pressed }) => [ui.card, pressed && ui.pressed]}>
       <View style={ui.row}><Text style={ui.title}>나의 PT 이용권</Text><DesignIcon name="chevron" /></View>
@@ -78,7 +80,7 @@ export function MyPageScreen({ onOpenBookings }: { onOpenBookings: () => void })
 
     <DetailSheet visible={menu !== null} title={menu ? titles[menu] : ''} onClose={() => setMenu(null)} footer={menu === 'logout' ? <Pressable accessibilityRole="button" disabled={logoutBusy} onPress={() => void signOut()} style={ui.button}><Text style={ui.buttonText}>{logoutBusy ? '로그아웃 중…' : '로그아웃'}</Text></Pressable> : menu === 'pt' ? <Pressable accessibilityRole="button" onPress={() => { setMenu(null); onOpenBookings(); }} style={ui.button}><Text style={ui.buttonText}>내 예약 보기</Text></Pressable> : menu === 'pause' ? <Pressable accessibilityRole="button" onPress={() => setMenu('pause-help')} style={ui.button}><Text style={ui.buttonText}>휴회 신청 안내</Text></Pressable> : <Pressable accessibilityRole="button" onPress={() => setMenu(null)} style={ui.button}><Text style={ui.buttonText}>확인</Text></Pressable>}>
       {menu === 'profile' && <><View style={ui.card}>{pair('이름', profile.name)}{pair('휴대전화', profile.phone)}{pair('계정번호', account?.accountId ?? '')}{pair('담당 트레이너', '연동 준비 중')}</View><Text style={ui.caption}>휴대전화번호 변경은 본인 확인을 위해 데스크에 문의해 주세요.</Text></>}
-      {menu === 'membership' && <><View style={ui.info}><Text style={ui.title}>시설 이용권 · 이용 중</Text><Text style={[ui.number, { fontSize: 30 }]}>{member.membership.expiresOn}</Text><Text style={ui.caption}>만료일</Text></View><View style={ui.card}>{pair('이용 시작', member.membership.startsOn)}{pair('현재 만료일', member.membership.expiresOn)}{pair('누적 개근 보상', '2일')}</View><Text style={ui.title}>기간 변경 이력</Text><View style={ui.card}><Text style={ui.body}>개근 보상으로 1일 연장</Text><Text style={ui.caption}>예시 기록 · 2026.10.23</Text><View style={ui.divider} /><Text style={ui.body}>개근 보상으로 1일 연장</Text><Text style={ui.caption}>예시 기록 · 2026.10.05</Text></View></>}
+      {menu === 'membership' && <><View style={ui.info}><Text style={ui.title}>시설 이용권 · {membership.label}</Text><Text style={[ui.number, { fontSize: 30 }]}>{membership.expiresOn}</Text><Text style={ui.caption}>만료일</Text></View><View style={ui.card}>{pair('이용 시작', membership.startsOn)}{pair('현재 만료일', membership.expiresOn)}</View></>}
       {menu === 'pt' && <><View style={ui.card}><Text style={ui.title}>{member.pt.label}</Text>{pair('담당 트레이너', member.trainer)}{pair('유효기간', '2026.11.01–12.30')}{pair('실제 잔여', `${state.remaining}회`)}{pair('현재 예약 횟수', `${heldCredits(state)}회`)}{pair('추가 예약 가능', `${available}회`)}</View><View style={ui.info}><Text style={ui.body}>예약하면 추가 예약 가능 횟수가 1회 줄어요.</Text><Text style={ui.caption}>실제 차감은 수업 예정 종료 후 이루어져요. 예약·변경·취소 예시가 이 횟수에도 함께 반영돼요.</Text></View></>}
       {menu === 'pause' && <><View style={[ui.card, ui.empty]}><Text style={ui.title}>등록된 휴회 내역이 없어요.</Text><Text style={ui.caption}>운동을 잠시 쉬어야 할 때 휴회를 신청할 수 있어요.</Text></View><Text style={ui.body}>휴무와 휴회일은 개근 진행을 보존해요. (회원 신청 휴회는 개근 보존이 되지 않아요.)</Text><Text style={ui.caption}>신청 가능한 기간과 횟수는 데스크에서 설정한 이용권 조건에 따라 달라져요.</Text></>}
       {menu === 'pause-help' && <><Text style={ui.body}>휴회 시작일 전에 기간을 정해 신청해 주세요.</Text><View style={ui.info}><Text style={ui.title}>승인 후 적용되는 내용</Text><Text style={ui.caption}>승인된 실제 휴회 일수만큼 시설·PT 유효기간을 조정해요. 겹치는 PT 예약은 무차감 취소되며 취소된 예약은 자동 복원되지 않아요.</Text></View><Text style={ui.caption}>현재는 화면 미리보기예요. 실제 휴회가 접수되지는 않아요.</Text></>}
@@ -88,7 +90,7 @@ export function MyPageScreen({ onOpenBookings }: { onOpenBookings: () => void })
       {menu === 'settings' && <><Text style={ui.caption}>받고 싶은 앱 알림을 선택해 주세요.</Text><View style={styles.menuCard}>{([{ key: 'booking', label: 'PT 예약·수업 알림' }, { key: 'membership', label: '이용권 만료 알림' }, { key: 'journal', label: '수업 일지 등록 알림' }] as const).map(item => <View key={item.key} style={styles.settingRow}><Text style={[ui.body, ui.fill]}>{item.label}</Text><Switch accessibilityLabel={item.label} value={settings[item.key]} onValueChange={value => setSettings(current => ({ ...current, [item.key]: value }))} trackColor={{ false: colors.border, true: colors.primary }} thumbColor={colors.card} ios_backgroundColor={colors.border} /></View>)}</View><Text style={ui.small}>미리보기 설정이에요. 앱을 다시 열면 초기값으로 돌아가요. 알림함 기록에는 영향을 주지 않아요.</Text></>}
       {menu === 'password' && <><View style={ui.info}><Text style={ui.title}>안전하게 계정을 관리해요.</Text><Text style={ui.body}>비밀번호 변경에는 현재 계정의 본인 인증이 필요해요.</Text></View><Text style={ui.caption}>이번 디자인 미리보기에서는 비밀번호를 입력하거나 변경하지 않아요.</Text></>}
       {menu === 'logout' && <>{!!logoutError && <Text accessibilityRole="alert" style={ui.body}>{logoutError}</Text>}<Text style={ui.body}>로그아웃하면 다음 이용 시 다시 로그인해야 해요.</Text><View style={ui.info}><Text style={ui.caption}>현재 기기의 로그인 세션이 종료돼요.</Text></View></>}
-      {menu === 'withdraw' && <><Text style={ui.body}>탈퇴하기 전에 남은 이용권과 예약을 확인해 주세요.</Text><View style={ui.card}>{pair('시설 이용권', `${member.membership.remainingDays}일`)}{pair('PT 실제 잔여', `${state.remaining}회`)}{pair('현재 예약 횟수', `${heldCredits(state)}회`)}</View><Text style={ui.caption}>탈퇴는 환불 실행이나 남은 계약 포기 동의로 간주되지 않아요. 정산은 데스크에 별도로 문의해 주세요.</Text><View style={ui.info}><Text style={ui.small}>현재는 안내 화면만 확인해요. 실제 탈퇴가 접수되거나 회원정보가 삭제되지 않아요.</Text></View></>}
+      {menu === 'withdraw' && <><Text style={ui.body}>탈퇴하기 전에 남은 이용권과 예약을 확인해 주세요.</Text><View style={ui.card}>{pair('시설 이용권', `${membership.remainingDays}일`)}{pair('PT 실제 잔여', `${state.remaining}회`)}{pair('현재 예약 횟수', `${heldCredits(state)}회`)}</View><Text style={ui.caption}>탈퇴는 환불 실행이나 남은 계약 포기 동의로 간주되지 않아요. 정산은 데스크에 별도로 문의해 주세요.</Text><View style={ui.info}><Text style={ui.small}>현재는 안내 화면만 확인해요. 실제 탈퇴가 접수되거나 회원정보가 삭제되지 않아요.</Text></View></>}
     </DetailSheet>
   </MemberPage>;
 }
@@ -103,6 +105,3 @@ const styles = StyleSheet.create({
   group: { gap: 10 }, groupTitle: { fontFamily: fonts.medium, fontSize: 12, lineHeight: 20, color: colors.readableMuted, paddingHorizontal: 6, marginTop: 4 }, menuCard: { borderRadius: 24, backgroundColor: colors.card, overflow: 'hidden' }, menuRow: { minHeight: 60, paddingHorizontal: 20, paddingVertical: 16, gap: 10, flexDirection: 'row', alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }, menuLabel: { flex: 1, fontFamily: fonts.medium, fontSize: 14, lineHeight: 24, color: colors.ink }, menuBadge: { fontFamily: fonts.bold, fontSize: 10, color: colors.primary, backgroundColor: colors.congestion, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 10, overflow: 'hidden' },
   backLink: { minHeight: 40, justifyContent: 'center' }, unreadDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.primary }, settingRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 64, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
 });
-
-
-

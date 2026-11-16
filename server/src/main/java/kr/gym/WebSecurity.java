@@ -40,17 +40,18 @@ class WebSecurity {
             .csrf(c->c.csrfTokenRepository(csrf).csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler()))
             .authorizeHttpRequests(c->c
                 .requestMatchers("/api/v1/admin/**","/api/v1/auth/reauthenticate").hasRole("OPERATOR")
-                .requestMatchers("/api/v1/me/attendance").hasRole("MEMBER")
-                .requestMatchers("/api/v1/me","/api/v1/auth/logout").authenticated()
-                .requestMatchers("/api/v1/auth/login","/api/v1/auth/mfa/verify","/api/v1/auth/code/consume","/api/v1/auth/csrf").permitAll()
+                .requestMatchers("/api/v1/me/attendance","/api/v1/me/qr","/api/v1/me/qr/**").hasRole("MEMBER")
+                .requestMatchers("/api/v1/occupancy").authenticated()
+                .requestMatchers("/api/v1/me","/api/v1/me/membership","/api/v1/me/nickname","/api/v1/auth/logout").authenticated()
+                .requestMatchers("/api/v1/auth/register","/api/v1/auth/login","/api/v1/auth/mfa/verify","/api/v1/auth/code/consume","/api/v1/auth/csrf").permitAll()
                 .requestMatchers("/api/**").denyAll().anyRequest().permitAll())
             .exceptionHandling(c->c.authenticationEntryPoint((request,response,error)->failure(response,json,401,"UNAUTHENTICATED","다시 로그인해 주세요."))
                 .accessDeniedHandler((request,response,error)->{
                     // [목적] CSRF 거절과 역할 부족을 분리해 잘못된 재로그인 안내를 피합니다.
                     if(error instanceof CsrfException) failure(response,json,403,"CSRF_INVALID","요청 인증이 변경됐어요. 다시 시도해 주세요.");
-                    else failure(response,json,403,"ACCESS_DENIED","운영자 권한이 필요한 작업입니다. 운영자 계정의 추가 인증을 완료해 주세요.");
+                    else failure(response,json,403,"ACCESS_DENIED","이 기능을 사용할 권한이 없습니다. 필요한 권한의 계정으로 로그인해 주세요.");
                 }))
-            .headers(c->c.contentSecurityPolicy(p->p.policyDirectives("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")))
+            .headers(c->c.contentSecurityPolicy(p->p.policyDirectives("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")))
             .addFilterBefore(new OncePerRequestFilter(){
                 @Override protected void doFilterInternal(HttpServletRequest request,HttpServletResponse response,FilterChain chain) throws ServletException,IOException {
                     if(request.getContentLengthLong()>8192){failure(response,json,413,"BODY_TOO_LARGE","요청 내용이 너무 큽니다.");return;}

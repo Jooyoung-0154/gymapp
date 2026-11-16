@@ -7,6 +7,8 @@ import { HomeScreen } from '../screens/HomeScreen';
 import { AttendanceScreen } from '../screens/AttendanceScreen';
 import { BookingScreen, type BookingSection } from '../screens/BookingScreen';
 import { MyPageScreen } from '../screens/MyPageScreen';
+import { useNavigate } from './router';
+import { useAuth } from '../state/AuthContext';
 import { BookingPreviewProvider } from '../state/BookingPreviewContext';
 import { colors, fonts } from '../theme/warmWellness';
 
@@ -27,10 +29,15 @@ export function MemberTabs({ desktopPreview }: { desktopPreview: boolean }) {
 }
 
 function MemberTabContent({ desktopPreview }: { desktopPreview: boolean }) {
+  const { account } = useAuth();
+  const operator = account?.roles.includes('OPERATOR') ?? false;
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<TabKey>('home');
   const [bookingSection, setBookingSection] = useState<BookingSection>('new');
   const insets = useSafeAreaInsets();
   const openBookings = () => { setBookingSection('mine'); setActiveTab('booking'); };
+  // [기능] 운영자의 관리자 메뉴는 별도 관리자 경로로 이동합니다.
+  const openMy = () => { if (operator) navigate('/admin/members'); else setActiveTab('my'); };
 
   // [처리 흐름] useEffect 콜백 처리: 안드로이드 뒤로가기는 다른 탭에서 홈으로 이동시킵니다. 탭 변경·해제 시 기존 이벤트 구독을 제거합니다.
   useEffect(() => {
@@ -44,21 +51,21 @@ function MemberTabContent({ desktopPreview }: { desktopPreview: boolean }) {
 
   return (
     <View style={styles.screen}>
-      <Text style={{ color: colors.readableMuted, textAlign: 'center', fontSize: 11, padding: 6 }}>회원정보·출석 조회 연동 · 홈 요약·이용권·예약은 예시</Text>
+      <Text style={{ color: colors.readableMuted, textAlign: 'center', fontSize: 11, padding: 6 }}>회원정보·이용권·QR·출석·혼잡도 연동 · 연속 출석·예약은 예시</Text>
       {tabs.map(tab => (
         <View key={tab.key} style={[styles.screen, activeTab !== tab.key && styles.hidden]}>
-          {tab.key === 'home' ? <HomeScreen onOpenBookings={openBookings} onOpenAttendance={() => setActiveTab('attendance')} onOpenMy={() => setActiveTab('my')} /> : tab.key === 'attendance' ? <AttendanceScreen /> : tab.key === 'booking' ? <BookingScreen section={bookingSection} onSectionChange={setBookingSection} /> : <MyPageScreen onOpenBookings={openBookings} />}
+          {tab.key === 'home' ? <HomeScreen active={activeTab === 'home'} onOpenBookings={openBookings} onOpenAttendance={() => setActiveTab('attendance')} onOpenMy={openMy} /> : tab.key === 'attendance' ? <AttendanceScreen active={activeTab === 'attendance'} /> : tab.key === 'booking' ? <BookingScreen section={bookingSection} onSectionChange={setBookingSection} /> : !operator && <MyPageScreen active={activeTab === 'my'} onOpenBookings={openBookings} />}
         </View>
       ))}
       <View style={[styles.bottomBar, { paddingBottom: desktopPreview ? 9 : Math.max(insets.bottom, 12) }]}>
         <View style={styles.tabs} accessibilityRole="tablist" accessibilityLabel="회원 메뉴">
           {tabs.map(tab => (
-            <Pressable key={tab.key} accessibilityRole="tab" accessibilityLabel={tab.label}
+            <Pressable key={tab.key} accessibilityRole="tab" accessibilityLabel={tab.key === 'my' && operator ? '관리자' : tab.label}
               accessibilityState={{ selected: activeTab === tab.key }}
-              onPress={() => setActiveTab(tab.key)}
+              onPress={() => tab.key === 'my' ? openMy() : setActiveTab(tab.key)}
               style={({ pressed }) => [styles.tab, activeTab === tab.key && styles.selected, pressed && styles.pressed]}>
               <DesignIcon name={tab.key} />
-              <Text style={[styles.label, activeTab === tab.key && styles.selectedLabel]}>{tab.label}</Text>
+              <Text style={[styles.label, activeTab === tab.key && styles.selectedLabel]}>{tab.key === 'my' && operator ? '관리자' : tab.label}</Text>
             </Pressable>
           ))}
         </View>
@@ -81,5 +88,3 @@ const styles = StyleSheet.create({
   selectedLabel: { fontFamily: fonts.bold, color: colors.primary },
   homeIndicator: { width: 112, height: 4, borderRadius: 100, backgroundColor: colors.ink, alignSelf: 'center' },
 });
-
-

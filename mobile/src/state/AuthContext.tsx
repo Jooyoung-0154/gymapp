@@ -28,7 +28,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setChecking(true); setError('');
     try {
       const me = await authApi.me();
-      if (!me.roles.includes('MEMBER')) throw new Error('등록된 회원 계정으로 로그인해 주세요.');
+      if (!me.roles.some(role => ['MEMBER', 'OPERATOR'].includes(role))) throw new Error('등록된 회원 계정으로 로그인해 주세요.');
       if (current === generation.current) setAccount(me);
     } catch (e) {
       if (current !== generation.current) return;
@@ -36,15 +36,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!(e instanceof ApiError && e.status === 401)) setError((e as Error).message);
     } finally { if (current === generation.current) setChecking(false); }
   }
-  // [기능] login 함수: 로그인을 요청합니다. 회원 앱은 추가 인증이 필요한 운영자와 MEMBER 역할이 없는 계정을 허용하지 않습니다.
+  // [기능] login 함수: 승인 대기는 안내하고 운영자 추가 인증은 공통 로그인 화면에서 이어갑니다.
   async function login(phone: string, password: string) {
-    ++generation.current;
+    const current = ++generation.current;
     const result = await authApi.login(phone, password);
-    if (result.mfaRequired) throw new Error('운영자 계정은 서버의 운영자 화면에서 추가 인증해 주세요.');
+    if (current !== generation.current) return;
+    if (result.approvalPending) throw new Error('승인 대기 중입니다. 운영자 승인 후 다시 로그인해 주세요.');
     const me = await authApi.me();
-    if (!me.roles.includes('MEMBER')) {
+    if (current !== generation.current) return;
+    if (!me.roles.some(role => ['MEMBER', 'OPERATOR'].includes(role))) {
       await authApi.logout();
-      throw new Error('등록된 회원 계정으로 로그인해 주세요.');
+      throw new Error('회원 또는 운영자 계정으로 로그인해 주세요.');
     }
     setAccount(me); setError('');
   }

@@ -13,12 +13,12 @@ import { colors, fonts, layout } from '../theme/warmWellness';
 const weekdays = ['일', '월', '화', '수', '목', '금', '토'];
 
 
-export function AttendanceScreen() {
+export function AttendanceScreen({ active = true }: { active?: boolean }) {
   const insets = useSafeAreaInsets();
   const initialToday = calendarToday();
   const [month, setMonth] = useState<CalendarMonth>({ year: Number(initialToday.slice(0,4)), month: Number(initialToday.slice(5,7)) });
   const key = monthKey(month);
-  const { data, error, loading, retry } = useAttendance(key);
+  const { data, error, loading, retry } = useAttendance(key, active);
   const today = data?.today ?? initialToday;
   const latest = today.slice(0,7);
   const cells = useMemo(() => calendarCells(month), [month]);
@@ -149,5 +149,3 @@ const styles = StyleSheet.create({
   policy: { fontFamily: fonts.regular, fontSize: 11, lineHeight: 18, color: colors.readableMuted, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12 },
   example: { fontFamily: fonts.regular, fontSize: 11, lineHeight: 19, color: colors.readableMuted, paddingHorizontal: 4 },
 });
-
-

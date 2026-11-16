@@ -12,12 +12,18 @@
     <dependency><groupId>org.springframework.security</groupId><artifactId>spring-security-test</artifactId><scope>test</scope></dependency>
   </dependencies>
     <!-- [목적] Mockito를 JVM 시작 때 로드해 Windows의 동적 attach 파이프 차단으로 테스트가 멈추는 문제를 방지합니다. -->
-  <build><plugins>
+  <build><resources>
+    <resource><directory>src/main/resources</directory><excludes><exclude>static/**</exclude></excludes></resource>
+    <resource><directory>../mobile/dist</directory><targetPath>static</targetPath></resource>
+  </resources><plugins>
     <plugin>
       <groupId>org.apache.maven.plugins</groupId><artifactId>maven-surefire-plugin</artifactId>
       <configuration>
         <argLine>-javaagent:"${settings.localRepository}/org/mockito/mockito-core/${mockito.version}/mockito-core-${mockito.version}.jar"</argLine>
       </configuration>
-    </plugin><plugin><groupId>org.springframework.boot</groupId><artifactId>spring-boot-maven-plugin</artifactId></plugin></plugins></build>
+    </plugin><plugin><groupId>org.springframework.boot</groupId><artifactId>spring-boot-maven-plugin</artifactId>
+      <!-- [목적] 일반 JAR을 이름 변경하지 않고 별도의 실행 JAR을 생성합니다. -->
+      <configuration><classifier>exec</classifier></configuration>
+    </plugin></plugins></build>
 </project>
 

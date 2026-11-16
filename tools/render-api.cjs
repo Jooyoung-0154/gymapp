@@ -1,3 +1,4 @@
+// [목적] render-api.cjs 파일: API 명세 Markdown을 읽어 HTML 문서로 변환합니다. HTML 이스케이프로 문서 내용을 안전한 문자로 출력합니다.
 const fs = require('fs');
 const path = require('path');
 const root = path.resolve(__dirname, '..');

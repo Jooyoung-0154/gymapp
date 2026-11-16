@@ -83,6 +83,10 @@ public class AuthService {
         Integer sources=db.queryForObject("SELECT count(*) FROM gym.login_attempts WHERE source_fingerprint=? AND attempted_at>now()-interval '15 minutes'",Integer.class,sourceHash);
         if(attempts>=5 || sources>=100 || (row!=null && live(row.get("locked_until")))) throw new ApiError(429,"LOGIN_LIMITED","잠시 후 다시 시도해 주세요.");
         boolean valid=crypto.matches(password,row!=null && row.get("password_hash")!=null?(String)row.get("password_hash"):dummyHash);
+        if(row!=null && valid && "PENDING".equals(row.get("status"))) {
+            recordAttempt(row.get("id").toString(),fingerprint,sourceHash,true);
+            return Reply.ok(Map.of("approvalPending",true));
+        }
         if(row==null || !valid || !"ACTIVE".equals(row.get("status"))) {
             failed(row,fingerprint,sourceHash);throw ApiError.login();
         }
@@ -93,12 +97,7 @@ public class AuthService {
             if(!active) {failed(row,fingerprint,sourceHash);throw ApiError.login();}
         }
         recordAttempt(accountId,fingerprint,sourceHash,true);
-        if(roles.contains("OPERATOR")) {
-            String challenge=crypto.randomToken();
-            db.update("INSERT INTO gym.auth_challenges(id_hash,account_id,security_version,expires_at) VALUES(?,?::bigint,?,now()+interval '5 minutes')",crypto.fingerprint("challenge:"+challenge),accountId,row.get("security_version"));
-            return Reply.ok(Map.of("mfaRequired",true,"challengeId",challenge));
-        }
-        return session(row,false);
+        return session(row,roles.contains("OPERATOR"));
     }
     // [기능] roles 메서드: 계정에 부여된 역할 목록을 조회합니다.
     private List<String> roles(String accountId) { return db.queryForList("SELECT role FROM gym.account_roles WHERE account_id=?::bigint ORDER BY role",String.class,accountId); }
@@ -142,13 +141,13 @@ public class AuthService {
     // [기능] session 메서드: 무작위 세션 토큰을 발급합니다. DB에는 토큰의 HMAC을 저장하고 권한별 만료 시간을 적용합니다.
     private Reply session(Map<String,Object> account,boolean operator) {
         String token=crypto.randomToken();String privilege=operator?"OPERATOR":"STANDARD";
-        db.update("INSERT INTO gym.account_sessions(account_id,token_hash,privilege,security_version,last_seen_at,expires_at,mfa_verified_at,reauthenticated_at) VALUES(?,?,?, ?,now(),now()+CASE WHEN ? THEN interval '12 hours' ELSE interval '30 days' END,CASE WHEN ? THEN now() ELSE NULL END,CASE WHEN ? THEN now() ELSE NULL END)",account.get("id"),crypto.fingerprint("session:"+token),privilege,account.get("security_version"),operator,operator,operator);
+        db.update("INSERT INTO gym.account_sessions(account_id,token_hash,privilege,security_version,last_seen_at,expires_at,mfa_verified_at,reauthenticated_at) VALUES(?,?,?, ?,now(),now()+CASE WHEN ? THEN interval '12 hours' ELSE interval '30 days' END,NULL,CASE WHEN ? THEN now() ELSE NULL END)",account.get("id"),crypto.fingerprint("session:"+token),privilege,account.get("security_version"),operator,operator);
         return new Reply(200,Map.of("mfaRequired",false),token);
     }
     // [목적] authenticate 메서드: 쿠키 토큰의 지문으로 유효 세션과 계정 상태를 조회하고 마지막 접근 시각을 갱신합니다.
     public Actor authenticate(String token) {
         if(token==null || token.length()>100)return null;
-        var rows=db.queryForList("SELECT s.id session_id,s.account_id,s.privilege FROM gym.account_sessions s JOIN gym.accounts a ON a.id=s.account_id WHERE s.token_hash=? AND s.revoked_at IS NULL AND a.status='ACTIVE' AND s.security_version=a.security_version AND s.expires_at>now() AND s.last_seen_at>now()-CASE WHEN s.privilege='OPERATOR' THEN interval '30 minutes' ELSE interval '7 days' END AND (s.privilege<>'OPERATOR' OR (s.mfa_verified_at IS NOT NULL AND EXISTS(SELECT 1 FROM gym.mfa_enrollments m WHERE m.account_id=a.id AND m.revoked_at IS NULL AND m.confirmed_at IS NOT NULL)))",crypto.fingerprint("session:"+token));
+        var rows=db.queryForList("SELECT s.id session_id,s.account_id,s.privilege FROM gym.account_sessions s JOIN gym.accounts a ON a.id=s.account_id WHERE s.token_hash=? AND s.revoked_at IS NULL AND a.status='ACTIVE' AND s.security_version=a.security_version AND s.expires_at>now() AND s.last_seen_at>now()-CASE WHEN s.privilege='OPERATOR' THEN interval '30 minutes' ELSE interval '7 days' END",crypto.fingerprint("session:"+token));
         if(rows.isEmpty())return null;var row=rows.getFirst();
         String id=row.get("account_id").toString();List<String> roles=new ArrayList<>(roles(id));
         if(!"OPERATOR".equals(row.get("privilege")))roles.remove("OPERATOR");
@@ -158,9 +157,38 @@ public class AuthService {
     // [기능] me 메서드: 인증된 계정의 이름·전화번호를 복호화해 계정 정보 응답을 만듭니다.
     public Reply me(Actor actor) {
         var row=db.queryForMap("SELECT id,phone_ciphertext,display_name_ciphertext,status FROM gym.accounts WHERE id=?::bigint",actor.id);
-        return Reply.ok(Map.of("accountId",actor.id,"name",crypto.decrypt((byte[])row.get("display_name_ciphertext")),"phone",crypto.decrypt((byte[])row.get("phone_ciphertext")),"roles",actor.roles,"status",row.get("status")));
+        return Reply.ok(Map.of("accountId",actor.id,"name",crypto.decrypt((byte[])row.get("display_name_ciphertext")),"phone",crypto.decrypt((byte[])row.get("phone_ciphertext")),"roles",actor.roles,"status",row.get("status"),"nicknameRequired",crypto.decrypt((byte[])row.get("display_name_ciphertext")).isBlank()));
     }
     // [기능] members 메서드: 최신 회원 최대 100명을 조회해 운영자 목록에 필요한 정보로 변환합니다.
+    public Reply membership(Actor actor) {
+        var rows=db.queryForList("SELECT p.id,p.starts_on,p.current_expires_on FROM gym.memberships p JOIN gym.members m ON m.id=p.member_id WHERE m.account_id=?::bigint AND p.status='REGISTERED' ORDER BY CASE WHEN p.starts_on<=?::date AND p.current_expires_on>=?::date THEN 0 WHEN p.starts_on>?::date THEN 1 ELSE 2 END,CASE WHEN p.starts_on>?::date THEN p.starts_on END ASC,p.starts_on DESC LIMIT 1",actor.id(),LocalDate.now(ZoneId.of("Asia/Seoul")).toString(),LocalDate.now(ZoneId.of("Asia/Seoul")).toString(),LocalDate.now(ZoneId.of("Asia/Seoul")).toString(),LocalDate.now(ZoneId.of("Asia/Seoul")).toString());
+        if(rows.isEmpty()) return Reply.ok(Map.of("registered",false));
+        var row=rows.getFirst();
+        LocalDate start=LocalDate.parse(row.get("starts_on").toString()), end=LocalDate.parse(row.get("current_expires_on").toString()), today=LocalDate.now(ZoneId.of("Asia/Seoul"));
+        return Reply.ok(Map.of("registered",true,"startsOn",start.toString(),"expiresOn",end.toString(),"remainingDays",Math.max(0,java.time.temporal.ChronoUnit.DAYS.between(today.isBefore(start)?start:today,end)+1),"status",today.isBefore(start)?"SCHEDULED":today.isAfter(end)?"EXPIRED":"ACTIVE"));
+    }
+    // [기능] registerMembership은 승인된 회원의 시설 이용권을 등록합니다. 회원 잠금과 기간 중복 검사로 중복 계약을 막습니다.
+    public Reply registerMembership(Actor actor,String accountId,Map<String,Object> body) {
+        if(actor==null || !actor.roles().contains("OPERATOR")) throw new ApiError(403,"FORBIDDEN","운영자만 등록할 수 있습니다.");
+        id(accountId);
+        LocalDate start,end;
+        try { start=LocalDate.parse(text(body,"startsOn",10));end=LocalDate.parse(text(body,"expiresOn",10)); }
+        catch(java.time.format.DateTimeParseException e) { throw ApiError.invalid("날짜는 YYYY-MM-DD 형식으로 입력해 주세요."); }
+        if(start.getYear()<1900 || end.getYear()>2100 || end.isBefore(start)) throw ApiError.invalid("이용 시작일과 만료일을 확인해 주세요.");
+        var members=db.queryForList("SELECT m.id FROM gym.members m JOIN gym.accounts a ON a.id=m.account_id WHERE a.id=?::bigint AND a.status='ACTIVE' AND m.status='ACTIVE' FOR UPDATE OF m",accountId);
+        if(members.isEmpty()) throw new ApiError(409,"MEMBER_NOT_ACTIVE","승인된 회원에게만 이용권을 등록할 수 있습니다.");
+        String memberId=members.getFirst().get("id").toString();
+        if(!db.queryForList("SELECT id FROM gym.memberships WHERE member_id=?::bigint AND status='REGISTERED' AND starts_on<=?::date AND current_expires_on>=?::date",memberId,end.toString(),start.toString()).isEmpty()) throw new ApiError(409,"MEMBERSHIP_OVERLAP","기존 이용권과 기간이 겹칩니다.");
+        lock("membership-policy");
+        var policies=db.queryForList("SELECT id FROM gym.policy_versions WHERE effective_from<=now() AND (effective_until IS NULL OR effective_until>now())");
+        if(policies.isEmpty()) {
+            db.update("INSERT INTO gym.policy_versions(version_name,effective_from,requirements_version,values_snapshot,changed_by,reason) VALUES(?,now(),?,?::jsonb,?::bigint,?)", "facility-"+UUID.randomUUID(),"facility-membership-1","{\"membershipDatesInclusive\":true}",actor.id(),"시설 이용권 등록 기본 정책");
+            policies=db.queryForList("SELECT id FROM gym.policy_versions WHERE effective_from<=now() AND (effective_until IS NULL OR effective_until>now())");
+        }
+        var membershipId=db.queryForObject("INSERT INTO gym.memberships(member_id,original_starts_on,original_expires_on,starts_on,current_expires_on,status,registered_by,policy_version_id) VALUES(?::bigint,?::date,?::date,?::date,?::date,'REGISTERED',?::bigint,?::bigint) RETURNING id",Long.class,memberId,start.toString(),end.toString(),start.toString(),end.toString(),actor.id(),policies.getFirst().get("id"));
+        audit(actor,"MEMBERSHIP",membershipId.toString(),"REGISTER","MEMBERSHIP_REGISTERED");
+        return new Reply(201,Map.of("membershipId",membershipId.toString()),null);
+    }
     public Reply members(Actor actor) {
         var rows=db.queryForList("SELECT a.id account_id,m.id member_id,a.phone_ciphertext,a.display_name_ciphertext,a.status account_status,m.status,a.security_version FROM gym.accounts a JOIN gym.members m ON m.account_id=a.id ORDER BY m.id DESC LIMIT 100");
         return Reply.ok(Map.of("items",rows.stream().map(this::memberView).toList()));
@@ -168,6 +196,28 @@ public class AuthService {
     // [기능] memberView 메서드: DB 행을 화면 응답으로 바꾸고 표시할 개인정보를 복호화합니다.
     private Map<String,Object> memberView(Map<String,Object> row) {
         return Map.of("accountId",row.get("account_id").toString(),"memberId",row.get("member_id").toString(),"name",crypto.decrypt((byte[])row.get("display_name_ciphertext")),"phone",crypto.decrypt((byte[])row.get("phone_ciphertext")),"status",row.get("status"),"accountStatus",row.get("account_status"),"version",row.get("security_version"));
+    }
+    // [기능] requestRegistration: 회원이 전화번호와 비밀번호만으로 승인 대기 계정을 만듭니다.
+    public Reply requestRegistration(Map<String,Object> body) {
+        String phone=SecurityTools.phone(text(body,"phone",40)),password=text(body,"password",256);
+        SecurityTools.validatePassword(password);
+        byte[] hash=crypto.fingerprint("phone:"+phone);lock("phone:"+crypto.fingerprintHex(phone));
+        if(Boolean.TRUE.equals(db.queryForObject("SELECT EXISTS(SELECT FROM gym.accounts WHERE phone_lookup_hmac=?)",Boolean.class,hash)))throw new ApiError(409,"PHONE_EXISTS","이미 등록된 휴대전화번호입니다. 로그인해 주세요.");
+        Long accountId=db.queryForObject("INSERT INTO gym.accounts(phone_lookup_hmac,phone_ciphertext,display_name_ciphertext,pii_key_ref,password_hash,status,password_changed_at) VALUES(?,?,?,'local-dev',?,'PENDING',now()) RETURNING id",Long.class,hash,crypto.encrypt(phone),crypto.encrypt(""),crypto.hashPassword(password));
+        db.update("INSERT INTO gym.members(account_id,status) VALUES(?,'PENDING')",accountId);
+        db.update("INSERT INTO gym.account_roles(account_id,role,granted_by) VALUES(?,'MEMBER',?)",accountId,accountId);
+        audit(new Actor(accountId.toString(),"",List.of()),"ACCOUNT",accountId.toString(),"REGISTER","SELF_REGISTRATION_REQUESTED");
+        return new Reply(201,Map.of("approvalPending",true),null);
+    }
+    // [기능] setNickname: 승인된 회원이 첫 접속 시 표시할 닉네임을 정합니다.
+    public Reply setNickname(Actor actor,Map<String,Object> body) {
+        if(!actor.roles().contains("MEMBER"))throw new ApiError(403,"ACCESS_DENIED","회원 계정으로 이용해 주세요.");
+        var row=account(actor.id());
+        if(!crypto.decrypt((byte[])row.get("display_name_ciphertext")).isBlank())throw new ApiError(409,"NICKNAME_ALREADY_SET","이미 닉네임을 설정했습니다.");
+        String nickname=text(body,"nickname",20).strip();
+        if(nickname.length()<2 || nickname.codePoints().anyMatch(Character::isISOControl))throw ApiError.invalid("닉네임은 제어문자 없이 2~20자로 입력해 주세요.");
+        db.update("UPDATE gym.accounts SET display_name_ciphertext=?,updated_at=now() WHERE id=?::bigint",crypto.encrypt(nickname),actor.id());
+        return me(actor);
     }
     // [기능] register 메서드: 전화번호 중복과 본인 확인 조건을 검사한 후 대기 상태의 계정·회원·역할과 감사 기록을 만듭니다.
     public Reply register(Actor actor,Map<String,Object> body) {
@@ -183,7 +233,8 @@ public class AuthService {
     }
     // [목적] changeStatus 메서드: 예상 버전으로 동시 수정을 검사하고 회원 상태를 변경합니다. 보안 버전 증가와 세션 폐기로 이전 로그인을 무효화합니다.
     public Reply changeStatus(Actor actor,String accountId,Map<String,Object> body) {
-        var row=account(accountId);String reason=text(body,"reason",1000),state=text(body,"status",20);
+        var row=account(accountId);String state=text(body,"status",20);
+        String reason="ACTIVE".equals(state)?"운영자 회원 승인":text(body,"reason",1000);
         if(!List.of("ACTIVE","SUSPENDED").contains(state))throw ApiError.invalid("승인 또는 정지를 선택해 주세요.");
         if(!(body.get("expectedVersion") instanceof Number version) || version.intValue()!=((Number)row.get("security_version")).intValue())throw new ApiError(409,"VERSION_CONFLICT","정보가 변경됐습니다. 새로 조회해 주세요.");
         if(!Boolean.TRUE.equals(db.queryForObject("SELECT EXISTS(SELECT 1 FROM gym.members WHERE account_id=?::bigint)",Boolean.class,accountId)))throw new ApiError(404,"NOT_FOUND","회원 계정을 찾을 수 없습니다.");
